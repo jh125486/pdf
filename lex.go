@@ -418,8 +418,8 @@ func (b *buffer) readObject() object {
 			return b.readDict()
 		case "[":
 			return b.readArray()
-		case ">>":
-			// stop the object
+		case ">>", "]":
+			// stop the object - these mark the end of dict/array
 			return nil
 		}
 		b.errorf("unexpected keyword %q parsing object", kw)
@@ -466,7 +466,7 @@ func (b *buffer) readArray() object {
 	var x array
 	for {
 		tok := b.readToken()
-		if tok == nil || tok == keyword("]") {
+		if tok == nil || tok == io.EOF || tok == keyword("]") {
 			break
 		}
 		b.unreadToken(tok)
