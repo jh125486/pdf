@@ -1,6 +1,6 @@
 # PDF Reader
 
-A simple Go library which enables reading PDF files. Forked from https://github.com/ledongtuoc/pdf
+A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf
 
 Features
   - Get plain text content (without format)
