@@ -508,6 +508,13 @@ func (b *buffer) readArray() object {
 		if tok == nil || tok == io.EOF || tok == keyword("]") {
 			break
 		}
+		if err, ok := tok.(error); ok && err == io.EOF {
+			// whenever the buffer b is empty it constantly outputs
+			// io.EOF which is then continuously appended to the array x.
+			// this goes on until an OOM kill by the OS.
+			// break this inifinte loop and avoid an OOM kill.
+			break
+		}
 		b.unreadToken(tok)
 		x = append(x, b.readObject())
 	}

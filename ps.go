@@ -56,23 +56,26 @@ func newDict() Value {
 func Interpret(strm Value, do func(stk *Stack, op string)) {
 	var stk Stack
 	var dicts []dict
-	s := strm
-	strmlen := 1
-	if strm.Kind() == Array {
-		strmlen = strm.Len()
-	}
 
-	for i := 0; i < strmlen; i++ {
-		if strm.Kind() == Array {
-			s = strm.Index(i)
+	var b *buffer
+	if strm.Kind() == Array {
+		strmlen := strm.Len()
+		streams := make([]io.Reader, 0, strmlen)
+		for i := 0; i < strmlen; i++ {
+			streams = append(streams, strm.Index(i).Reader())
 		}
 
-		rd := s.Reader()
+		// concatenate all the streams readers into a single reader.
+		multiReader := io.MultiReader(streams...)
 
-		b := newBuffer(rd, 0)
-		b.allowEOF = true
-		b.allowObjptr = false
-		b.allowStream = false
+		b = newBuffer(multiReader, 0)
+	} else {
+		rd := strm.Reader()
+		b = newBuffer(rd, 0)
+	}
+	b.allowEOF = true
+	b.allowObjptr = false
+	b.allowStream = false
 
 	Reading:
 		for {
@@ -138,7 +141,6 @@ func Interpret(strm Value, do func(stk *Stack, op string)) {
 			obj := b.readObject()
 			stk.Push(Value{nil, objptr{}, obj})
 		}
-	}
 }
 
 type seqReader struct {
