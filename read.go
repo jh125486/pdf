@@ -194,20 +194,26 @@ func NewReader(f io.ReaderAt, size int64) (*Reader, error) {
 // If the PDF is encrypted, NewReaderEncrypted calls pw repeatedly to obtain passwords
 // to try. If pw returns the empty string, NewReaderEncrypted stops trying to decrypt
 // the file and returns an error.
-func NewReaderEncrypted(f io.ReaderAt, size int64, pw func() string) (reader *Reader, err error) {
+func NewReaderEncrypted(f io.ReaderAt, size int64, pw func() string) (r *Reader, err error) {
 	// The lexer reports malformed input by panicking (see buffer.errorf), and
 	// a PDF read here is untrusted by definition. Convert those panics into
 	// errors so that opening a corrupt or hostile file cannot take down the
 	// caller.
 	defer func() {
 		if e := recover(); e != nil {
-			reader, err = nil, fmt.Errorf("malformed PDF: %v", e)
+			r = nil
+			if x, ok := e.(error); ok {
+				err = x
+			} else {
+				err = fmt.Errorf("malformed PDF: %v", e)
+			}
 		}
 	}()
 
 	if size < int64(len("%PDF-1.0\n%%EOF")) {
 		return nil, fmt.Errorf("not a PDF file: too short")
 	}
+
 	buf := make([]byte, 10)
 	f.ReadAt(buf, 0)
 	if !bytes.HasPrefix(buf, []byte("%PDF-1.")) || buf[7] < '0' || buf[7] > '7' || buf[8] != '\r' && buf[8] != '\n' {
@@ -235,7 +241,7 @@ func NewReaderEncrypted(f io.ReaderAt, size int64, pw func() string) (reader *Re
 		return nil, fmt.Errorf("malformed PDF file: missing final startxref")
 	}
 
-	r := &Reader{
+	r = &Reader{
 		f:   f,
 		end: end,
 	}
