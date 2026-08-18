@@ -1,6 +1,14 @@
 # PDF Reader
 
-A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf
+A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf.
+
+**Why this fork exists**: upstream has been unresponsive to open security PRs, including the fix
+for [GO-2026-6115](https://pkg.go.dev/vuln/GO-2026-6115) / CVE-2026-56867 (OOM panics, infinite
+loops, and stack overflow from malformed/hostile PDF input — see
+[ledongthuc/pdf#78](https://github.com/ledongthuc/pdf/pull/78)). This fork merges that fix along
+with the other pending hardening PRs (#58, #63, #64, #66, #76, #79, #81) and is published as its
+own module, `github.com/jh125486/pdf`, since upstream shows no sign of merging or tagging a
+release.
 
 Features
   - Get plain text content (without format)
@@ -8,7 +16,7 @@ Features
 
 ## Install:
 
-`go get -u github.com/gage-marshall/pdf`
+`go get -u github.com/jh125486/pdf`
 
 ## Examples:
 
@@ -24,7 +32,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/gage-marshall/pdf"
+	"github.com/jh125486/pdf"
 )
 
 func main() {
@@ -55,7 +63,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/gage-marshall/pdf"
+	"github.com/jh125486/pdf"
 )
 
 func main() {
@@ -92,7 +100,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gage-marshall/pdf"
+	"github.com/jh125486/pdf"
 )
 
 func main() {
