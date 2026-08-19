@@ -1,29 +1,72 @@
-name: Go CI
+name: CI
 
 on:
   push:
-    branches: [ "*" ]
+    branches: [master]
   pull_request:
-    branches: [ "*" ]
+    branches: [master]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Check out code
+        # Actions below are pinned to full commit SHAs, not tags: a tag can be
+        # re-pointed (deliberately, by a re-tag, or maliciously, by a
+        # compromised release) to run different code than what was reviewed,
+        # while a SHA can't. The trailing `# vN` comment is only for humans.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history, not just the checked-out commit: golangci-lint's
+          # issues.new-from-rev setting (see .golangci.yml) diffs against a
+          # fixed baseline commit, which a shallow clone wouldn't have.
+          fetch-depth: 0
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24'
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
 
-    - name: Install dependencies
-      run: go mod download
+      - name: Build
+        run: go build ./...
 
-    - name: Run tests
-      run: go test -v ./...
+      - name: Vet
+        run: go vet ./...
 
-    - name: Build
-      run: go build -v ./... 
+      - name: Test
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: ./coverage.out
+          # Codecov's current policy is that public open-source repos on
+          # codecov.io don't need a token; this is passed anyway (empty
+          # until the secret is created) so a private-repo period, or a
+          # policy change, doesn't silently stop uploads. fail_ci_if_error
+          # keeps a missing/invalid token from failing the whole CI run.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # See the Test job's checkout step: golangci-lint's new-from-rev
+          # needs the baseline commit reachable, not just the tip.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          version: v1.64.8

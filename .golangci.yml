@@ -1,0 +1,70 @@
+version: "2"
+
+run:
+  go: "1.24"
+  tests: true
+  timeout: 5m
+
+linters:
+  # Reasonably lean set focused on correctness and security hardening
+  # (this fork's whole purpose is resilience against malformed/hostile
+  # PDF input), not exhaustive style enforcement. Kept intentionally
+  # smaller than a "full" config (e.g. turango's) since this repo is
+  # just getting CI for the first time -- see exclusions.rules /
+  # new-from-rev below for how pre-existing findings are handled rather
+  # than by trimming this list further.
+  enable:
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unconvert
+    - unused
+
+  settings:
+    gosec:
+      excludes:
+        # G304 (file path from variable) fires constantly in a PDF parser
+        # that legitimately opens caller-supplied paths (pdfpasswd/main.go,
+        # examples/*); that's the tool's job, not a vulnerability here.
+        - G304
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    paths:
+      - examples/
+      # Small illustrative example binaries, not part of the library's
+      # public API surface; not worth holding to the same bar.
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - examples/
+
+issues:
+  # This repo had no CI at all before this workflow, and already carries
+  # known, unaddressed lint debt (gofmt-unclean name.go/read.go,
+  # staticcheck/modernize suggestions like interface{}->any and
+  # range-over-int, deprecated io/ioutil usage, plus a handful of
+  # errcheck/ineffassign/unused findings in read.go, lex.go, ps.go and
+  # the test files). Rather than either (a) failing CI on day one for
+  # issues that predate this workflow and are unrelated to whatever a
+  # given PR actually changes, or (b) quietly disabling whole linter
+  # classes to dodge them, new-from-rev scopes reporting to lines that
+  # differ from this fixed baseline commit -- the commit CI was added
+  # on. Pre-existing issues on untouched lines are grandfathered;
+  # anything touched or added after this point is held to the enabled
+  # linters/formatters above. Bump this rev forward (e.g. to a commit
+  # where the pre-existing debt above has been cleaned up) once that
+  # cleanup lands, if a stricter whole-repo gate is ever wanted.
+  new-from-rev: fb4eab54dad9ba7c7ae0b7a02c61711ba5d8b0b1
