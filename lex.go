@@ -7,6 +7,7 @@
 package pdf
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -94,7 +95,11 @@ func (b *buffer) reload() bool {
 	if n == 0 && err != nil {
 		b.buf = b.buf[:0]
 		b.pos = 0
-		if b.allowEOF && err == io.EOF {
+		// A content stream can reference a Value that isn't actually a
+		// stream (e.g. an indirect reference the xref table couldn't
+		// resolve). That surfaces here as errStreamNotPresent; treat it
+		// like end of input rather than a malformed-PDF panic.
+		if b.allowEOF && (errors.Is(err, io.EOF) || errors.Is(err, errStreamNotPresent)) {
 			b.eof = true
 			return false
 		}

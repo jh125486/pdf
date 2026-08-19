@@ -800,3 +800,104 @@ end`
 		t.Errorf("Decode(D) = %q, want %q", got, "D")
 	}
 }
+
+// TestHeaderTrailingSpace guards ledongthuc/pdf#22: libtiff/tiff2pdf emits a
+// header line like "%PDF-1.1 \n" (a space before the newline), which real
+// readers accept but this package used to reject as an invalid header.
+func TestHeaderTrailingSpace(t *testing.T) {
+	data := validPDF()
+	data = bytes.Replace(data, []byte("%PDF-1.4\n"), []byte("%PDF-1.4 \n"), 1)
+
+	if _, err := NewReader(bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatalf("NewReader with space-padded header: %v", err)
+	}
+}
+
+// TestStreamNotPresentEndsCleanly guards ledongthuc/pdf#24 and #35: a page
+// whose /Contents resolves to a non-stream value (here, a free/missing
+// object) used to make errorReadCloser hand buffer.reload a fresh
+// fmt.Errorf("stream not present") on every call. Because that error had no
+// identity to compare against, reload treated it as an unrecoverable read
+// error and panicked with "malformed PDF: reading at offset 0: stream not
+// present" instead of simply ending the (empty) content stream.
+func TestStreamNotPresentEndsCleanly(t *testing.T) {
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		// /Contents 9 0 R points at an object number with no xref entry, so
+		// it resolves to a null Value rather than a stream.
+		"<< /Type /Page /Parent 2 0 R /Contents 9 0 R /MediaBox [0 0 612 792] >>",
+	}
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, body := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xrefOff := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n", len(objs)+1)
+	b.WriteString("0000000000 65535 f \n")
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\n", len(objs)+1)
+	fmt.Fprintf(&b, "startxref\n%d\n%%%%EOF\n", xrefOff)
+	data := []byte(b.String())
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	mustNotCrash(t, func() {
+		p := r.Page(1)
+		if text, err := p.GetPlainText(nil); err != nil {
+			t.Errorf("GetPlainText: %v", err)
+		} else if text != "" {
+			t.Errorf("GetPlainText = %q, want empty", text)
+		}
+	})
+}
+
+// TestGetTextByRowStableOrder guards ledongthuc/pdf#16: GetTextByRow and
+// GetTextByColumn sorted with sort.Sort, which is not guaranteed to preserve
+// the relative order of characters whose sort key compares equal (same row,
+// same column bucket). That reordered digits within a run, e.g. "176"
+// coming back as "761". sort.Stable keeps characters in the order they were
+// drawn when their keys tie.
+func TestGetTextByRowStableOrder(t *testing.T) {
+	data := validPDF()
+	// validPDF's content stream draws "Hello World" at a single Tm; that
+	// alone isn't enough to force a tie in the sort key, so this only
+	// checks the happy path still returns rows/columns without error and
+	// in left-to-right reading order.
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	p := r.Page(1)
+
+	rows, err := p.GetTextByRow()
+	if err != nil {
+		t.Fatalf("GetTextByRow: %v", err)
+	}
+	var got strings.Builder
+	for _, row := range rows {
+		for _, c := range row.Content {
+			got.WriteString(c.S)
+		}
+	}
+	if want := "Hello World"; got.String() != want {
+		t.Errorf("GetTextByRow text = %q, want %q", got.String(), want)
+	}
+
+	cols, err := p.GetTextByColumn()
+	if err != nil {
+		t.Fatalf("GetTextByColumn: %v", err)
+	}
+	if len(cols) == 0 {
+		t.Error("GetTextByColumn returned no columns")
+	}
+}

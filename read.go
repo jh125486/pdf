@@ -68,6 +68,7 @@ import (
 	"crypto/md5"
 	"crypto/rc4"
 	"encoding/ascii85"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -214,9 +215,19 @@ func NewReaderEncrypted(f io.ReaderAt, size int64, pw func() string) (r *Reader,
 		return nil, fmt.Errorf("not a PDF file: too short")
 	}
 
-	buf := make([]byte, 10)
+	buf := make([]byte, 11)
 	f.ReadAt(buf, 0)
-	if !bytes.HasPrefix(buf, []byte("%PDF-1.")) || buf[7] < '0' || buf[7] > '7' || buf[8] != '\r' && buf[8] != '\n' {
+	if !bytes.HasPrefix(buf, []byte("%PDF-1.")) || buf[7] < '0' || buf[7] > '7' {
+		return nil, fmt.Errorf("not a PDF file: invalid header")
+	}
+	// libtiff/tiff2pdf emits a space before the line terminator, e.g.
+	// "%PDF-1.1 \n" instead of "%PDF-1.1\n"; both are accepted by other
+	// readers, so skip over it here too.
+	c := buf[8]
+	if c == ' ' {
+		c = buf[9]
+	}
+	if c != '\r' && c != '\n' {
 		return nil, fmt.Errorf("not a PDF file: invalid header")
 	}
 	end := size
@@ -989,13 +1000,20 @@ func (e *errorReadCloser) Close() error {
 	return e.err
 }
 
+// errStreamNotPresent is returned by the ReadCloser from Value.Reader when
+// v.Kind() != Stream. It is a sentinel (rather than a fresh fmt.Errorf on
+// each call) so that callers such as buffer.reload can recognize it with
+// errors.Is and treat it as a clean end of input instead of a malformed-PDF
+// panic.
+var errStreamNotPresent = errors.New("stream not present")
+
 // Reader returns the data contained in the stream v.
 // If v.Kind() != Stream, Reader returns a ReadCloser that
 // responds to all reads with a ``stream not present'' error.
 func (v Value) Reader() io.ReadCloser {
 	x, ok := v.data.(stream)
 	if !ok {
-		return &errorReadCloser{fmt.Errorf("stream not present")}
+		return &errorReadCloser{errStreamNotPresent}
 	}
 	streamLen := v.Key("Length").Int64()
 	// Handle empty streams - return empty reader without applying filters.

@@ -750,7 +750,7 @@ func (p Page) GetTextByColumn() (result Columns, err error) {
 	p.walkTextBlocks(showText)
 
 	for _, column := range result {
-		sort.Sort(column.Content)
+		sort.Stable(column.Content)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
@@ -824,7 +824,7 @@ func (p Page) GetTextByRow() (result Rows, err error) {
 	p.walkTextBlocks(showText)
 
 	for _, row := range result {
-		sort.Sort(row.Content)
+		sort.Stable(row.Content)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
