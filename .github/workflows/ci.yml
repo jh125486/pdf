@@ -69,4 +69,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
         with:
-          version: v1.64.8
+          # .golangci.yml is v2-schema config; the v2 binary is required to
+          # read it at all (v1 rejects it outright: "you are using a
+          # configuration file for golangci-lint v2 with golangci-lint v1").
+          version: v2.12.2
