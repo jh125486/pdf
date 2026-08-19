@@ -584,9 +584,11 @@ func readXrefTableData(b *buffer, table []xref) ([]xref, error) {
 		// n alone is bounded above by start+n (checked just above, since
 		// start >= 0), but not by a constant CodeQL can trace through that
 		// arithmetic -- check it directly too before using it as a loop
-		// bound.
-		if err := checkObjectNumber(n); err != nil {
-			return nil, fmt.Errorf("malformed xref table: %w", err)
+		// bound. Not checkObjectNumber: n is a subsection count, not an
+		// object number, and that function's error text says "object
+		// number" -- reusing it here would report the wrong thing.
+		if n > maxObjectNumber {
+			return nil, fmt.Errorf("malformed xref table: subsection count %d out of range [0, %d]", n, maxObjectNumber)
 		}
 		nInt, ok := int64ToInt(n)
 		if !ok {
