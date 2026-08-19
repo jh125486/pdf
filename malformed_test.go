@@ -7,6 +7,7 @@ package pdf
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -1030,5 +1031,65 @@ func TestReaderRecoversFromMalformedFilter(t *testing.T) {
 	defer rc.Close()
 	if _, err := io.ReadAll(rc); err == nil {
 		t.Error("reading a malformed image filter chain: got nil error, want one")
+	}
+}
+
+// aesEncryptMetadataFalsePDF is the minimal repro from ledongthuc/pdf#82: a
+// one-page "hello world" PDF encrypted with V=4, R=4, 128-bit AES (AESV2),
+// an empty user and owner password, and /EncryptMetadata false. Built with
+// `qpdf --encrypt "" "" 128 --use-aes=y --force-V4 --cleartext-metadata --
+// in.pdf repro.pdf` and confirmed to open with an empty password in qpdf,
+// pdfcpu, and Adobe.
+const aesEncryptMetadataFalsePDFBase64 = `` +
+	`JVBERi0xLjYKJb/3ov4KMSAwIG9iago8PCAvUGFnZXMgMiAwIFIgL1R5cGUgL0NhdGFsb2cgPj4K
+ZW5kb2JqCjIgMCBvYmoKPDwgL0NvdW50IDEgL0tpZHMgWyAzIDAgUiBdIC9UeXBlIC9QYWdlcyA+
+PgplbmRvYmoKMyAwIG9iago8PCAvQ29udGVudHMgNCAwIFIgL01lZGlhQm94IFsgMCAwIDIwMCAx
+MDAgXSAvUGFyZW50IDIgMCBSIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDUgMCBSID4+ID4+
+IC9UeXBlIC9QYWdlID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggODAgL0ZpbHRlciAvRmxh
+dGVEZWNvZGUgPj4Kc3RyZWFtCnEOVaJCEl2iYC6i4jlIx50rXT2ZRhamhIIQWZROnsqigqG2ql57
+ToeOpRCn7FdtNPAcxxdfWjM7djpeNEsEdS/+9dAZLbRQ+siWE0qVeDOZZW5kc3RyZWFtCmVuZG9i
+ago1IDAgb2JqCjw8IC9CYXNlRm9udCAvSGVsdmV0aWNhIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAv
+Rm9udCA+PgplbmRvYmoKNiAwIG9iago8PCAvQ0YgPDwgL1N0ZENGIDw8IC9BdXRoRXZlbnQgL0Rv
+Y09wZW4gL0NGTSAvQUVTVjIgL0xlbmd0aCAxNiA+PiA+PiAvRW5jcnlwdE1ldGFkYXRhIGZhbHNl
+IC9GaWx0ZXIgL1N0YW5kYXJkIC9MZW5ndGggMTI4IC9PIDwzNjQ1MWJkMzlkNzUzYjdjMWQxMDky
+MmMyOGU2NjY1YWE0ZjMzNTNmYjAzNDhiNTM2ODkzZTNiMWRiNWM1NzliPiAvT0UgPD4gL1AgLTQg
+L1IgNCAvU3RtRiAvU3RkQ0YgL1N0ckYgL1N0ZENGIC9VIDw3ODczNTU0ZjI5ZTMwNzZkZWI3NmU3
+YmUwYWQ0NmU1YjAwMjE0NDY5OTBiOWU0MTE0MDcxYTRkOTEwNDk4NGMxPiAvVUUgPD4gL1YgNCA+
+PgplbmRvYmoKeHJlZgowIDcKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4g
+CjAwMDAwMDAwNjQgMDAwMDAgbiAKMDAwMDAwMDEyMyAwMDAwMCBuIAowMDAwMDAwMjUxIDAwMDAw
+IG4gCjAwMDAwMDA0MDEgMDAwMDAgbiAKMDAwMDAwMDQ3MSAwMDAwMCBuIAp0cmFpbGVyIDw8IC9S
+b290IDEgMCBSIC9TaXplIDcgL0lEIFs8MjAyNDlkNjNkOGM0ODhmYTcxNjc1NDAzMjkzYmUzZjE+
+PGI2NzRhMzY5MmE1NzllMzA3MGI1ZDBhYmRkMDE4ZjRkPl0gL0VuY3J5cHQgNiAwIFIgPj4Kc3Rh
+cnR4cmVmCjgwNwolJUVPRgo=`
+
+// TestAESEncryptMetadataFalse guards ledongthuc/pdf#82: initEncrypt never
+// implemented PDF 32000-1:2008 Algorithm 2 step (f) -- hashing in four
+// 0xFF bytes when /EncryptMetadata is false, for R>=4. Every key derived
+// for such a file was wrong, so the U check always failed and a correctly
+// empty password came back as ErrInvalidPassword. This encryption
+// combination (content encrypted, metadata left in cleartext for indexing)
+// is common from e-signature/export tools, so this rejected otherwise
+// normal files outright.
+func TestAESEncryptMetadataFalse(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(
+		strings.ReplaceAll(aesEncryptMetadataFalsePDFBase64, "\n", ""))
+	if err != nil {
+		t.Fatalf("decoding embedded test PDF: %v", err)
+	}
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	rd, err := r.GetPlainText()
+	if err != nil {
+		t.Fatalf("GetPlainText: %v", err)
+	}
+	text, err := io.ReadAll(rd)
+	if err != nil {
+		t.Fatalf("reading text: %v", err)
+	}
+	if !strings.Contains(string(text), "hello world") {
+		t.Errorf("GetPlainText = %q, want it to contain %q", text, "hello world")
 	}
 }

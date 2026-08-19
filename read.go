@@ -1200,6 +1200,19 @@ func (r *Reader) initEncrypt(password string) error {
 	h.Write([]byte(O))
 	h.Write([]byte{byte(P), byte(P >> 8), byte(P >> 16), byte(P >> 24)})
 	h.Write([]byte(ID))
+	// PDF 32000-1:2008 §7.6.3.3, Algorithm 2 step (f): if document metadata
+	// is not being encrypted (/EncryptMetadata false, only meaningful for
+	// R>=4), four bytes of 0xFF are hashed in here too. EncryptMetadata
+	// defaults to true, so its absence changes nothing. Skipping this step
+	// produces the wrong key for any R>=4 file with /EncryptMetadata false
+	// -- common in e-signature/export tools that leave metadata in
+	// cleartext for indexing -- and made a correctly-empty password come
+	// back as ErrInvalidPassword.
+	if R >= 4 {
+		if em, ok := encrypt["EncryptMetadata"].(bool); ok && !em {
+			h.Write([]byte{0xff, 0xff, 0xff, 0xff})
+		}
+	}
 	key := h.Sum(nil)
 
 	if R >= 3 {
