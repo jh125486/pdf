@@ -1,5 +1,13 @@
 # PDF Reader
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/jh125486/pdf)](https://pkg.go.dev/github.com/jh125486/pdf)
+
+[![Tests](https://github.com/jh125486/pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/jh125486/pdf/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/jh125486/pdf/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/jh125486/pdf/actions/workflows/codeql-analysis.yml)
+
+[![Codecov](https://codecov.io/gh/jh125486/pdf/branch/main/graph/badge.svg)](https://codecov.io/gh/jh125486/pdf)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/jh125486/pdf/badge)](https://scorecard.dev/viewer/?uri=github.com/jh125486/pdf)
+
 A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf.
 
 **Why this fork exists**: upstream has been unresponsive to open security PRs, including the fix

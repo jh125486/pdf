@@ -1,0 +1,67 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # A periodic scan catches new advisories against code that hasn't
+    # changed, not just new code — matching GitHub's own default template
+    # for this workflow.
+    - cron: '30 4 * * 1'
+
+permissions:
+  # actions:read and security-events:write live at job level below, which
+  # always wins over this top-level default anyway — narrowed here to match
+  # every other workflow's convention in this repo (see scorecard.yml's
+  # identical fix), since OpenSSF Scorecard's Token-Permissions check flags
+  # any write scope set at the top level, whether or not a job actually
+  # uses it.
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['go']
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          # Matches ci.yml's pin so CodeQL builds this module the same way
+          # CI does.
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          languages: ${{ matrix.language }}
+          # build-mode: manual, not autobuild -- autobuild discovers and
+          # traces every go.mod it finds in the checkout. tools.mod (this
+          # repo's dev-tool pin, see ci.yml) isn't named go.mod so it
+          # wouldn't be picked up either way, but manual mode also matches
+          # turango's own convention: run exactly the build command below,
+          # scoped to the root module, rather than relying on
+          # autobuild's discovery.
+          build-mode: manual
+
+      - name: Build
+        run: go build ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          category: '/language:${{ matrix.language }}'
