@@ -1154,3 +1154,19 @@ func buildPDF(objs []string) []byte {
 	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
 	return []byte(b.String())
 }
+
+// TestXrefTableGenerationOutOfRange guards a real truncation bug flagged by
+// CodeQL (go/incorrect-integer-conversion): readXrefTableData read a
+// classic-table entry's generation number as int64 and narrowed it straight
+// to uint16 with no bound check. A crafted generation field larger than
+// uint16's range (e.g. "99999999999", still a valid integer token) silently
+// wrapped into an unrelated small value instead of being rejected.
+func TestXrefTableGenerationOutOfRange(t *testing.T) {
+	data := xrefTablePDF(
+		"0 2\n0000000000 65535 f \n0000000016 99999999999 n \n",
+		"<< /Size 2 /Root 1 0 R >>",
+	)
+	if err := openBytes(data); err == nil {
+		t.Error("accepted an out-of-range xref generation number, want an error")
+	}
+}

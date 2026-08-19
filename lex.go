@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 )
 
@@ -473,9 +474,15 @@ func (b *buffer) readObject() object {
 		return tok
 	}
 
-	if t1, ok := tok.(int64); ok && int64(uint32(t1)) == t1 {
+	// t1/t2 are checked against explicit constant bounds, not a round-trip
+	// cast-and-compare: the two are equivalent, but static analysis (both
+	// human and CodeQL's incorrect-integer-conversion check) can verify a
+	// direct bound against math.MaxUint32/MaxUint16 while a round trip
+	// through uint32()/uint16() looks identical to the unguarded narrowing
+	// it's meant to rule out.
+	if t1, ok := tok.(int64); ok && t1 >= 0 && t1 <= math.MaxUint32 {
 		tok2 := b.readToken()
-		if t2, ok := tok2.(int64); ok && int64(uint16(t2)) == t2 {
+		if t2, ok := tok2.(int64); ok && t2 >= 0 && t2 <= math.MaxUint16 {
 			tok3 := b.readToken()
 			switch tok3 {
 			case keyword("R"):
