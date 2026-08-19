@@ -942,3 +942,38 @@ func TestUnterminatedArrayEndsCleanly(t *testing.T) {
 		r.Page(1).GetPlainText(nil)
 	})
 }
+
+// TestTdUpdatesPosition guards ledongthuc/pdf#18: walkTextBlocks (shared by
+// GetTextByRow and GetTextByColumn) only updated currentX/currentY on the Tm
+// operator. A page using Td for positioning -- the common case, since Td is
+// the relative move used between lines of a paragraph, while Tm is normally
+// only used to set the first absolute position -- left every Text at (0, 0)
+// and, because every row's Position was then 0, folded all lines into a
+// single row.
+func TestTdUpdatesPosition(t *testing.T) {
+	data := validPDF() // draws "Hello World" via "100 700 Td", no Tm.
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	rows, err := r.Page(1).GetTextByRow()
+	if err != nil {
+		t.Fatalf("GetTextByRow: %v", err)
+	}
+	found := false
+	for _, row := range rows {
+		for _, c := range row.Content {
+			if c.S != "Hello World" {
+				continue
+			}
+			found = true
+			if c.X != 100 || c.Y != 700 {
+				t.Errorf("Text{%q}.X,Y = %v,%v, want 100,700", c.S, c.X, c.Y)
+			}
+		}
+	}
+	if !found {
+		t.Fatal(`GetTextByRow: "Hello World" not found in any row`)
+	}
+}

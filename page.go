@@ -900,6 +900,16 @@ func (p Page) walkTextBlocks(walker func(enc TextEncoding, x, y float64, s strin
 				}
 			}
 		case "Td":
+			// Td tx ty moves to the start of the next line, offset by
+			// (tx, ty) from the start of the current line. Previously this
+			// case ignored its own operands, so currentX/currentY stayed
+			// at their zero value on any page using relative positioning
+			// (the common case) instead of only pages built with Tm.
+			if len(args) != 2 {
+				panic("bad Td")
+			}
+			currentX += args[0].Float64()
+			currentY += args[1].Float64()
 			walker(enc, currentX, currentY, "")
 		case "Tm":
 			// Only a lower bound, so that a stream leaving extra operands on
