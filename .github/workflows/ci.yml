@@ -67,9 +67,51 @@ jobs:
           go-version-file: go.mod
 
       - name: Lint
-        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        # go tool -modfile, not the golangci-lint-action marketplace action:
+        # the tool version lives in tools/golangci-lint/go.mod (bumped via
+        # `make update-lint`), so this runs the exact version a contributor
+        # gets locally via `make lint` -- no separate action-input pin to
+        # keep in sync, and no marketplace action in the trust chain at all.
+        run: go tool -modfile=tools/golangci-lint/go.mod golangci-lint run ./...
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # .golangci.yml is v2-schema config; the v2 binary is required to
-          # read it at all (v1 rejects it outright: "you are using a
-          # configuration file for golangci-lint v2 with golangci-lint v1").
-          version: v2.12.2
+          go-version-file: go.mod
+
+      - name: govulncheck
+        # This fork's entire reason to exist is hardening against malformed
+        # and hostile PDF input (see GO-2026-6115 / CVE-2026-56867 in
+        # README.md); a known vulnerability in a dependency landing here
+        # unnoticed would undercut that, so this blocks merge rather than
+        # just reporting.
+        run: go tool -modfile=tools/govulncheck/go.mod govulncheck ./...
+
+  modernize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: modernize
+        # Report-only, unlike lint/vulncheck above: modernize has no
+        # equivalent of golangci-lint's new-from-rev to scope findings to
+        # changed lines only, and this repo already carries pre-existing
+        # suggestions (interface{} -> any, range-over-int, and similar)
+        # across files this CI setup didn't touch. Failing the build on
+        # those would block unrelated PRs for debt they didn't add.
+        # `make modernize-fix` applies these locally when someone wants to
+        # clear the backlog; turn this into a hard gate once that lands.
+        run: go tool -modfile=tools/modernize/go.mod modernize ./...
+        continue-on-error: true
