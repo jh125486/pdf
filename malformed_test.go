@@ -901,3 +901,44 @@ func TestGetTextByRowStableOrder(t *testing.T) {
 		t.Error("GetTextByColumn returned no columns")
 	}
 }
+
+// TestUnterminatedArrayEndsCleanly guards ledongthuc/pdf#80: a content
+// stream that ends while an array is still open, e.g. "... Td [ ", used to
+// make readArray loop forever appending io.EOF as an object and never
+// return, growing without bound until the process was OOM-killed. This is
+// already covered indirectly by PR#79's lex.go fix; this case is the
+// exact minimal reproducer from the issue.
+func TestUnterminatedArrayEndsCleanly(t *testing.T) {
+	content := []byte("BT /F1 12 Tf 20 100 Td [ ")
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] " +
+			"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	}
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, body := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xrefOff := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
+	data := []byte(b.String())
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	mustNotCrash(t, func() {
+		r.Page(1).GetPlainText(nil)
+	})
+}
