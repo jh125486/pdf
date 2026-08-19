@@ -1010,7 +1010,7 @@ var errStreamNotPresent = errors.New("stream not present")
 // Reader returns the data contained in the stream v.
 // If v.Kind() != Stream, Reader returns a ReadCloser that
 // responds to all reads with a ``stream not present'' error.
-func (v Value) Reader() io.ReadCloser {
+func (v Value) Reader() (rc io.ReadCloser) {
 	x, ok := v.data.(stream)
 	if !ok {
 		return &errorReadCloser{errStreamNotPresent}
@@ -1021,6 +1021,24 @@ func (v Value) Reader() io.ReadCloser {
 	if streamLen == 0 {
 		return ioutil.NopCloser(bytes.NewReader(nil))
 	}
+
+	// Setting up the filter chain below panics on unsupported or malformed
+	// filter parameters (unknown filter name, corrupt zlib data, an invalid
+	// PNG predictor /Columns, ...). Reader has no error return, so a caller
+	// reading an embedded image or other stream directly -- rather than
+	// through GetPlainText and friends, which already recover -- used to
+	// crash on nothing worse than a malformed image in an otherwise valid
+	// PDF. Recover here and report it through the ReadCloser instead.
+	defer func() {
+		if e := recover(); e != nil {
+			if err, ok := e.(error); ok {
+				rc = &errorReadCloser{err}
+			} else {
+				rc = &errorReadCloser{fmt.Errorf("%v", e)}
+			}
+		}
+	}()
+
 	var rd io.Reader
 	rd = io.NewSectionReader(v.r.f, x.offset, streamLen)
 	if v.r.key != nil {

@@ -977,3 +977,58 @@ func TestTdUpdatesPosition(t *testing.T) {
 		t.Fatal(`GetTextByRow: "Hello World" not found in any row`)
 	}
 }
+
+// TestReaderRecoversFromMalformedFilter guards ledongthuc/pdf#57: setting up
+// a stream's filter chain (unknown filter name, corrupt zlib header, an
+// invalid PNG predictor) panics from inside Value.Reader, which has no
+// error return. GetPlainText and friends recover from panics in the
+// content-stream path, but a caller reading an image or other embedded
+// stream directly -- the normal way to get at one -- had nothing between it
+// and the panic. A single malformed image in an otherwise valid PDF crashed
+// the whole process instead of surfacing as an error from Read.
+func TestReaderRecoversFromMalformedFilter(t *testing.T) {
+	imgData := "garbage-not-flate-data"
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] " +
+			"/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>",
+		fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "+
+			"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "+
+			"/DecodeParms << /Predictor 99 /Columns 1 >> /Length %d >>\nstream\n%s\nendstream",
+			len(imgData), imgData),
+		"<< /Length 0 >>\nstream\n\nendstream",
+	}
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, body := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xrefOff := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
+	data := []byte(b.String())
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	var rc io.ReadCloser
+	mustNotCrash(t, func() {
+		rc = r.Page(1).Resources().Key("XObject").Key("Im0").Reader()
+	})
+	if rc == nil {
+		t.Fatal("Reader() returned nil after recovering")
+	}
+	defer rc.Close()
+	if _, err := io.ReadAll(rc); err == nil {
+		t.Error("reading a malformed image filter chain: got nil error, want one")
+	}
+}
