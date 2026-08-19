@@ -22,9 +22,9 @@ import (
 const caseTimeout = 15 * time.Second
 
 // run calls fn and reports whether it panicked or failed to return in time.
-func run(t *testing.T, fn func()) (panicked interface{}, timedOut bool) {
+func run(t *testing.T, fn func()) (panicked any, timedOut bool) {
 	t.Helper()
-	done := make(chan interface{}, 1)
+	done := make(chan any, 1)
 	go func() {
 		defer func() { done <- recover() }()
 		fn()
@@ -186,7 +186,7 @@ func TestLargeXrefTableGrows(t *testing.T) {
 	const n = maxXrefPrealloc + 5000
 
 	var entries bytes.Buffer
-	for i := 0; i < n; i++ {
+	for range n {
 		entries.Write([]byte{1, 9, 0}) // type 1, offset 9, generation 0
 	}
 	data := xrefStreamPDF(fmt.Sprintf("/Size %d /W [1 1 1]", n), entries.String())
@@ -208,7 +208,7 @@ func TestCompressedXrefStreamManyObjects(t *testing.T) {
 	const n = 100000
 
 	var raw bytes.Buffer
-	for i := 0; i < n; i++ {
+	for range n {
 		raw.Write([]byte{1, 9, 0})
 	}
 	var comp bytes.Buffer
@@ -436,7 +436,7 @@ func TestCyclicReferences(t *testing.T) {
 		// A chain longer than the cap but not cyclic still terminates.
 		leaf := dict{name("Resources"): dict{}}
 		cur := leaf
-		for i := 0; i < 500; i++ {
+		for range 500 {
 			cur = dict{name("Parent"): cur}
 		}
 		mustNotCrash(t, func() {
@@ -736,9 +736,9 @@ func TestConcurrentReads(t *testing.T) {
 
 	const goroutines = 8
 	errs := make(chan error, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				text, err := r.Page(1).GetPlainText(nil)
 				if err != nil {
 					errs <- err
@@ -752,7 +752,7 @@ func TestConcurrentReads(t *testing.T) {
 			errs <- nil
 		}()
 	}
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		if err := <-errs; err != nil {
 			t.Errorf("concurrent read: %v", err)
 		}

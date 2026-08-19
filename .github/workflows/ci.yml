@@ -64,20 +64,20 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # The tool's own go.mod, not the root one: golangci-lint can (and
-          # here does) require a newer Go to build than this library
-          # advertises as its own minimum -- deliberately kept low in
-          # go.mod's go directive (see README/ledongthuc/pdf#49/#54, users
-          # who need this library importable from older Go versions).
-          go-version-file: tools/golangci-lint/go.mod
+          # tools.mod, not the root go.mod: golangci-lint can (and here
+          # does) require a newer Go to build than this library advertises
+          # as its own minimum -- deliberately kept low in go.mod's go
+          # directive (see README/ledongthuc/pdf#49/#54, users who need
+          # this library importable from older Go versions).
+          go-version-file: tools.mod
 
       - name: Lint
         # go tool -modfile, not the golangci-lint-action marketplace action:
-        # the tool version lives in tools/golangci-lint/go.mod (bumped via
-        # `make update-lint`), so this runs the exact version a contributor
-        # gets locally via `make lint` -- no separate action-input pin to
-        # keep in sync, and no marketplace action in the trust chain at all.
-        run: go tool -modfile=tools/golangci-lint/go.mod golangci-lint run ./...
+        # the tool version lives in tools.mod (bumped via `make
+        # update-lint`), so this runs the exact version a contributor gets
+        # locally via `make lint` -- no separate action-input pin to keep
+        # in sync, and no marketplace action in the trust chain at all.
+        run: go tool -modfile=tools.mod golangci-lint run ./...
 
   vulncheck:
     runs-on: ubuntu-latest
@@ -88,19 +88,19 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # See the Lint job's Set up Go step for why this is the tool's own
-          # go.mod, not the root one.
-          go-version-file: tools/govulncheck/go.mod
+          # See the Lint job's Set up Go step for why this is tools.mod, not
+          # the root go.mod.
+          go-version-file: tools.mod
 
-      - name: govulncheck
+      - name: Check vulnerabilities
         # This fork's entire reason to exist is hardening against malformed
         # and hostile PDF input (see GO-2026-6115 / CVE-2026-56867 in
         # README.md); a known vulnerability in a dependency landing here
         # unnoticed would undercut that, so this blocks merge rather than
         # just reporting.
-        run: go tool -modfile=tools/govulncheck/go.mod govulncheck ./...
+        run: go tool -modfile=tools.mod govulncheck ./...
 
-  modernize:
+  gofix:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -109,18 +109,20 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # See the Lint job's Set up Go step for why this is the tool's own
-          # go.mod, not the root one.
-          go-version-file: tools/modernize/go.mod
+          # `go fix -diff`'s modernizer-based rewrites need a newer go
+          # command than this library advertises as its own minimum (root
+          # go.mod's go 1.24.1 doesn't even recognize the -diff flag) --
+          # tools.mod already carries a newer Go for golangci-lint/
+          # govulncheck, so reuse it here too rather than adding a third
+          # version to track.
+          go-version-file: tools.mod
 
-      - name: modernize
-        # Report-only, unlike lint/vulncheck above: modernize has no
-        # equivalent of golangci-lint's new-from-rev to scope findings to
-        # changed lines only, and this repo already carries pre-existing
-        # suggestions (interface{} -> any, range-over-int, and similar)
-        # across files this CI setup didn't touch. Failing the build on
-        # those would block unrelated PRs for debt they didn't add.
-        # `make modernize-fix` applies these locally when someone wants to
-        # clear the backlog; turn this into a hard gate once that lands.
-        run: go tool -modfile=tools/modernize/go.mod modernize ./...
-        continue-on-error: true
+      - name: Check Go fixes
+        # go fix is built into the go command, not a separate tool (so
+        # nothing in tools.mod names it) -- reports safe, mechanical
+        # modernizations: any/interface{}, range-over-int, and similar, the
+        # same rewrites `make fix` applies locally. -diff fails the build if
+        # any are outstanding rather than silently accepting them; the repo
+        # is clean as of this workflow's addition, so this is a real gate,
+        # not a report-only step.
+        run: go fix -diff ./...

@@ -78,7 +78,7 @@ func main() {
 }
 
 func inc(ctr []int, n int) {
-	for i := 0; i < len(ctr); i++ {
+	for i := range ctr {
 		ctr[i]++
 		if ctr[i] < n {
 			break

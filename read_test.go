@@ -13,7 +13,7 @@ func TestReadObjectMaxDepth(t *testing.T) {
 	// (caught here) instead of crashing the process.
 	const depth = maxObjectDepth + 100
 	var payload bytes.Buffer
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString("0 0 obj\n")
 	}
 
@@ -44,11 +44,11 @@ func TestReadDictMaxDepth(t *testing.T) {
 	// Deeply nested dictionaries: << /A << /A << ... >> >> >>
 	var payload bytes.Buffer
 	const depth = maxObjectDepth + 100
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString("<< /A ")
 	}
 	payload.WriteString("null")
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString(" >>")
 	}
 
@@ -74,11 +74,11 @@ func TestReadArrayMaxDepth(t *testing.T) {
 	// Deeply nested arrays: [ [ [ ... ] ] ]
 	var payload bytes.Buffer
 	const depth = maxObjectDepth + 100
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString("[ ")
 	}
 	payload.WriteString("null")
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString(" ]")
 	}
 
@@ -104,11 +104,11 @@ func TestReadObjectNormalDepth(t *testing.T) {
 	// A moderately nested structure should parse without hitting the limit.
 	var payload bytes.Buffer
 	const depth = 50
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString("<< /A ")
 	}
 	payload.WriteString("(hello)")
-	for i := 0; i < depth; i++ {
+	for range depth {
 		payload.WriteString(" >>")
 	}
 
@@ -140,7 +140,7 @@ func TestNewReaderMaliciousPDF(t *testing.T) {
 	// recovered panic) rather than crashing the process.
 	var pdf bytes.Buffer
 	pdf.WriteString("%PDF-1.0\n")
-	for i := 0; i < 10_000; i++ {
+	for range 10_000 {
 		pdf.WriteString("0\n0\nobj\n")
 	}
 	pdf.WriteString("startxref\n0\n%%EOF\n")

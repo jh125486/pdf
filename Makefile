@@ -1,4 +1,4 @@
-.PHONY: help test tidy lint update-lint vulncheck modernize modernize-fix fmt vet check build clean
+.PHONY: help test tidy lint vulncheck fix check-fix update-lint update-tools fmt vet check build clean
 
 .DEFAULT_GOAL := help
 
@@ -19,27 +19,30 @@ tidy:
 ## lint: Run golangci-lint with auto-fix enabled
 lint:
 	@echo "Running golangci-lint..."
-	@go tool -modfile=tools/golangci-lint/go.mod golangci-lint run --fix ./...
+	@go tool -modfile=tools.mod golangci-lint run --fix ./...
+
+## vulncheck: Check dependencies for known vulnerabilities
+vulncheck:
+	@echo "Checking dependencies for known vulnerabilities..."
+	@go tool -modfile=tools.mod govulncheck ./...
+
+## fix: Apply standard Go modernization rewrites
+fix:
+	@go fix ./...
+
+## check-fix: Fail if standard Go modernization rewrites are needed
+check-fix:
+	@go fix -diff ./...
 
 ## update-lint: Update golangci-lint to latest version
 update-lint:
 	@echo "Updating golangci-lint..."
-	@go get -tool -modfile=tools/golangci-lint/go.mod github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	@go get -tool -modfile=tools.mod github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
-## vulncheck: Check for known vulnerabilities in dependencies
-vulncheck:
-	@echo "Running govulncheck..."
-	@go tool -modfile=tools/govulncheck/go.mod govulncheck ./...
-
-## modernize: Report code that could use newer Go language/stdlib features
-modernize:
-	@echo "Running modernize..."
-	@go tool -modfile=tools/modernize/go.mod modernize ./...
-
-## modernize-fix: Apply modernize's suggested fixes
-modernize-fix:
-	@echo "Applying modernize fixes..."
-	@go tool -modfile=tools/modernize/go.mod modernize -fix ./...
+## update-tools: Update all development and CI tools
+update-tools:
+	@echo "Updating development and CI tools..."
+	@go get -tool -modfile=tools.mod github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest golang.org/x/vuln/cmd/govulncheck@latest
 
 ## fmt: Format code
 fmt:
@@ -51,8 +54,8 @@ vet:
 	@echo "Running go vet..."
 	@go vet ./...
 
-## check: Run all checks (format, vet, lint, vulncheck, test)
-check: tidy fmt vet lint vulncheck test
+## check: Run all checks (format, vet, lint, vulncheck, fix check, test)
+check: tidy fmt vet lint vulncheck check-fix test
 	@echo "All checks completed"
 
 ## build: Build the example and pdfpasswd binaries

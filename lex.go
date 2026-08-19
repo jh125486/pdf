@@ -21,7 +21,7 @@ import (
 //	string, a PDF string literal
 //	keyword, a PDF keyword
 //	name, a PDF name without the leading slash
-type token interface{}
+type token any
 
 // A name is a PDF name, without the leading slash.
 type name string
@@ -85,7 +85,7 @@ func (b *buffer) readByte() byte {
 	return c
 }
 
-func (b *buffer) errorf(format string, args ...interface{}) {
+func (b *buffer) errorf(format string, args ...any) {
 	panic(fmt.Errorf(format, args...))
 }
 
@@ -295,7 +295,7 @@ Loop:
 				// no append
 			case '0', '1', '2', '3', '4', '5', '6', '7':
 				x := int(c - '0')
-				for i := 0; i < 2; i++ {
+				for range 2 {
 					c = b.readByte()
 					if c < '0' || c > '7' {
 						b.unreadByte()
@@ -418,7 +418,7 @@ func isReal(s string) bool {
 //	objdef, a PDF object definition
 //
 // An object may also be nil, to represent the PDF null.
-type object interface{}
+type object any
 
 type dict map[name]object
 

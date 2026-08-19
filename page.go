@@ -546,9 +546,9 @@ var ident = matrix{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
 
 func (x matrix) mul(y matrix) matrix {
 	var z matrix
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			for k := 0; k < 3; k++ {
+	for i := range 3 {
+		for j := range 3 {
+			for k := range 3 {
 				z[i][j] += x[i][k] * y[k][j]
 			}
 		}
@@ -1030,7 +1030,7 @@ func (p Page) Content() Content {
 				panic("bad g.Tm")
 			}
 			var m matrix
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				m[i/2][i%2] = args[i].Float64()
 			}
 			m[2][2] = 1
@@ -1167,7 +1167,7 @@ func (p Page) Content() Content {
 				panic("bad g.Tm")
 			}
 			var m matrix
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				m[i/2][i%2] = args[i].Float64()
 			}
 			m[2][2] = 1

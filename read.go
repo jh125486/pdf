@@ -4,7 +4,7 @@
 
 // Package pdf implements reading of PDF files.
 //
-// Overview
+// # Overview
 //
 // PDF is Adobe's Portable Document Format, ubiquitous on the internet.
 // A PDF document is a complex data format built on a fairly simple structure.
@@ -43,7 +43,6 @@
 // they are implemented only in terms of the Value API and could be moved outside
 // the package. Equally important, traversal of other PDF data structures can be implemented
 // in other packages as needed.
-//
 package pdf
 
 // BUG(rsc): The package is incomplete, although it has been used successfully on some
@@ -162,10 +161,6 @@ func (r *Reader) sectionReader(off int64) (*io.SectionReader, error) {
 	return io.NewSectionReader(r.f, off, r.end-off), nil
 }
 
-func (r *Reader) errorf(format string, args ...interface{}) {
-	panic(fmt.Errorf(format, args...))
-}
-
 // Open opens a file for reading.
 func Open(file string) (*os.File, *Reader, error) {
 	f, err := os.Open(file)
@@ -232,10 +227,7 @@ func NewReaderEncrypted(f io.ReaderAt, size int64, pw func() string) (r *Reader,
 	}
 	end := size
 	const endChunk = 100
-	chunk := int64(endChunk)
-	if chunk > end {
-		chunk = end
-	}
+	chunk := min(int64(endChunk), end)
 	buf = make([]byte, chunk)
 	if _, err := f.ReadAt(buf, end-chunk); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("not a PDF file: %v", err)
@@ -617,7 +609,7 @@ func findLastLine(buf []byte, s string) int {
 type Value struct {
 	r    *Reader
 	ptr  objptr
-	data interface{}
+	data any
 }
 
 // IsNull reports whether the value is a null. It is equivalent to Kind() == Null.
@@ -672,7 +664,7 @@ func (v Value) String() string {
 	return objfmt(v.data)
 }
 
-func objfmt(x interface{}) string {
+func objfmt(x any) string {
 	switch x := x.(type) {
 	default:
 		return fmt.Sprint(x)
@@ -774,7 +766,7 @@ func (v Value) RawString() string {
 	return x
 }
 
-// Text returns v's string value interpreted as a ``text string'' (defined in the PDF spec)
+// Text returns v's string value interpreted as a “text string” (defined in the PDF spec)
 // and converted to UTF-8.
 // If v.Kind() != String, Text returns the empty string.
 func (v Value) Text() string {
@@ -879,14 +871,14 @@ func (v Value) Len() int {
 	return len(x)
 }
 
-func (r *Reader) resolve(parent objptr, x interface{}) Value {
+func (r *Reader) resolve(parent objptr, x any) Value {
 	return r.resolveAt(parent, x, 0)
 }
 
 // resolveAt resolves x, tracking how deeply it has recursed through object
 // streams. The depth is a parameter rather than Reader state so that a Reader
 // stays immutable once opened and remains safe to read from concurrently.
-func (r *Reader) resolveAt(parent objptr, x interface{}, depth int) Value {
+func (r *Reader) resolveAt(parent objptr, x any, depth int) Value {
 	if ptr, ok := x.(objptr); ok {
 		if ptr.id >= uint32(len(r.xref)) {
 			return Value{}
@@ -927,7 +919,7 @@ func (r *Reader) resolveAt(parent objptr, x interface{}, depth int) Value {
 				}
 				b := newBuffer(strm.Reader(), 0)
 				b.allowEOF = true
-				for i := 0; i < n; i++ {
+				for range n {
 					id, ok1 := b.readToken().(int64)
 					off, ok2 := b.readToken().(int64)
 					// /N is a declared count, not a measured one. Stop at the
@@ -1009,7 +1001,7 @@ var errStreamNotPresent = errors.New("stream not present")
 
 // Reader returns the data contained in the stream v.
 // If v.Kind() != Stream, Reader returns a ReadCloser that
-// responds to all reads with a ``stream not present'' error.
+// responds to all reads with a “stream not present” error.
 func (v Value) Reader() (rc io.ReadCloser) {
 	x, ok := v.data.(stream)
 	if !ok {
@@ -1216,7 +1208,7 @@ func (r *Reader) initEncrypt(password string) error {
 	key := h.Sum(nil)
 
 	if R >= 3 {
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			h.Reset()
 			h.Write(key[:n/8])
 			key = h.Sum(key[:0])
