@@ -64,7 +64,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          # The tool's own go.mod, not the root one: golangci-lint can (and
+          # here does) require a newer Go to build than this library
+          # advertises as its own minimum -- deliberately kept low in
+          # go.mod's go directive (see README/ledongthuc/pdf#49/#54, users
+          # who need this library importable from older Go versions).
+          go-version-file: tools/golangci-lint/go.mod
 
       - name: Lint
         # go tool -modfile, not the golangci-lint-action marketplace action:
@@ -83,7 +88,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          # See the Lint job's Set up Go step for why this is the tool's own
+          # go.mod, not the root one.
+          go-version-file: tools/govulncheck/go.mod
 
       - name: govulncheck
         # This fork's entire reason to exist is hardening against malformed
@@ -102,7 +109,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          # See the Lint job's Set up Go step for why this is the tool's own
+          # go.mod, not the root one.
+          go-version-file: tools/modernize/go.mod
 
       - name: modernize
         # Report-only, unlike lint/vulncheck above: modernize has no
