@@ -53,15 +53,18 @@ Search:
 		if depth++; depth > maxPageTreeDepth {
 			return Page{}
 		}
-		count := int(page.Key("Count").Int64())
-		if count < num {
+		count, ok := int64ToInt(page.Key("Count").Int64())
+		if !ok || count < num {
 			return Page{}
 		}
 		kids := page.Key("Kids")
 		for i := 0; i < kids.Len(); i++ {
 			kid := kids.Index(i)
 			if kid.Key("Type").Name() == "Pages" {
-				c := int(kid.Key("Count").Int64())
+				c, ok := int64ToInt(kid.Key("Count").Int64())
+				if !ok {
+					return Page{}
+				}
 				if num < c {
 					page = kid
 					continue Search
@@ -83,7 +86,11 @@ Search:
 
 // NumPage returns the number of pages in the PDF file.
 func (r *Reader) NumPage() int {
-	return int(r.Trailer().Key("Root").Key("Pages").Key("Count").Int64())
+	n, ok := int64ToInt(r.Trailer().Key("Root").Key("Pages").Key("Count").Int64())
+	if !ok {
+		return 0
+	}
+	return n
 }
 
 // GetPlainText returns all the text in the PDF file
@@ -206,12 +213,20 @@ func (f Font) BaseFont() string {
 
 // FirstChar returns the code point of the first character in the font.
 func (f Font) FirstChar() int {
-	return int(f.V.Key("FirstChar").Int64())
+	n, ok := int64ToInt(f.V.Key("FirstChar").Int64())
+	if !ok {
+		return 0
+	}
+	return n
 }
 
 // LastChar returns the code point of the last character in the font.
 func (f Font) LastChar() int {
-	return int(f.V.Key("LastChar").Int64())
+	n, ok := int64ToInt(f.V.Key("LastChar").Int64())
+	if !ok {
+		return 0
+	}
+	return n
 }
 
 // Widths returns the widths of the glyphs in the font.
@@ -297,7 +312,15 @@ func (e *dictEncoder) Decode(raw string) (text string) {
 		for j := 0; j < e.v.Len(); j++ {
 			x := e.v.Index(j)
 			if x.Kind() == Integer {
-				n = int(x.Int64())
+				// -1 is also the "no match" sentinel above, so a value
+				// that doesn't fit in an int (which int(raw[i]), 0-255,
+				// never will) safely just never matches instead of
+				// wrapping into an unrelated code point.
+				if v, ok := int64ToInt(x.Int64()); ok {
+					n = v
+				} else {
+					n = -1
+				}
 				continue
 			}
 			if x.Kind() == Name {

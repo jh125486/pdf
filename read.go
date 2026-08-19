@@ -70,6 +70,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -148,6 +149,20 @@ func checkObjectNumber(x int64) error {
 		return fmt.Errorf("object number %d out of range [0, %d]", x, maxObjectNumber)
 	}
 	return nil
+}
+
+// int64ToInt narrows an attacker-controlled int64 to the platform int type,
+// reporting ok=false rather than silently wrapping if it doesn't fit. On the
+// near-universal case of a 64-bit int this never fails; the check exists for
+// 32-bit platforms, where truncating a huge or negative value from a PDF
+// field (a page /Count, a font's /FirstChar, ...) would otherwise turn it
+// into an unrelated small, negative, or positive value instead of being
+// rejected (CWE-190).
+func int64ToInt(x int64) (int, bool) {
+	if x < math.MinInt || x > math.MaxInt {
+		return 0, false
+	}
+	return int(x), true
 }
 
 // sectionReader returns a reader for the file starting at off. Offsets in a
@@ -396,7 +411,7 @@ func readXrefStreamData(r *Reader, strm stream, table []xref, size int64) ([]xre
 	var w []int
 	for _, x := range ww {
 		i, ok := x.(int64)
-		if !ok || int64(int(i)) != i {
+		if !ok {
 			return nil, fmt.Errorf("invalid W array %v", objfmt(ww))
 		}
 		// A /W entry is a field width in bytes. A negative one slices the
@@ -566,12 +581,30 @@ func readXrefTableData(b *buffer, table []xref) ([]xref, error) {
 		if err := checkObjectNumber(start + n); err != nil {
 			return nil, fmt.Errorf("malformed xref table: %v", err)
 		}
-		for i := 0; i < int(n); i++ {
+		// n alone is bounded above by start+n (checked just above, since
+		// start >= 0), but not by a constant CodeQL can trace through that
+		// arithmetic -- check it directly too before using it as a loop
+		// bound.
+		if err := checkObjectNumber(n); err != nil {
+			return nil, fmt.Errorf("malformed xref table: %w", err)
+		}
+		nInt, ok := int64ToInt(n)
+		if !ok {
+			return nil, fmt.Errorf("malformed xref table: subsection count %d out of range", n)
+		}
+		for i := range nInt {
 			off, ok1 := b.readToken().(int64)
 			gen, ok2 := b.readToken().(int64)
 			alloc, ok3 := b.readToken().(keyword)
 			if !ok1 || !ok2 || !ok3 || alloc != keyword("f") && alloc != keyword("n") {
 				return nil, fmt.Errorf("malformed xref table")
+			}
+			// A generation number is stored in 5 decimal digits by
+			// convention, but nothing stops a crafted file from writing a
+			// much larger one; narrowing it straight to uint16 would wrap
+			// instead of being rejected.
+			if gen < 0 || gen > math.MaxUint16 {
+				return nil, fmt.Errorf("malformed xref table: generation %d out of range", gen)
 			}
 			x := int(start) + i
 			for cap(table) <= x {
@@ -911,7 +944,11 @@ func (r *Reader) resolveAt(parent objptr, x any, depth int) Value {
 				if strm.Key("Type").Name() != "ObjStm" {
 					panic("not an object stream")
 				}
-				n := int(strm.Key("N").Int64())
+				n64 := strm.Key("N").Int64()
+				if n64 < 0 || n64 > maxObjectNumber {
+					panic("object stream /N out of range")
+				}
+				n := int(n64)
 				first := strm.Key("First").Int64()
 				if first <= 0 {
 					panic("missing First")
