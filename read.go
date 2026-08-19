@@ -70,7 +70,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
@@ -1011,7 +1010,7 @@ func (v Value) Reader() (rc io.ReadCloser) {
 	// Handle empty streams - return empty reader without applying filters.
 	// This avoids zlib "unexpected EOF" errors on 0-length FlateDecode streams.
 	if streamLen == 0 {
-		return ioutil.NopCloser(bytes.NewReader(nil))
+		return io.NopCloser(bytes.NewReader(nil))
 	}
 
 	// Setting up the filter chain below panics on unsupported or malformed
@@ -1051,7 +1050,7 @@ func (v Value) Reader() (rc io.ReadCloser) {
 		}
 	}
 
-	return ioutil.NopCloser(rd)
+	return io.NopCloser(rd)
 }
 
 func applyFilter(rd io.Reader, name string, param Value) io.Reader {

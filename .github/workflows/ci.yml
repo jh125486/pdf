@@ -36,6 +36,15 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Check Go fixes
+        # go fix is built into the go command (needs 1.26+, which is why
+        # go.mod's go directive was bumped there rather than kept lower):
+        # reports safe, mechanical modernizations -- any/interface{},
+        # range-over-int, io/ioutil -> io, and similar -- the same rewrites
+        # `make fix` applies locally. -diff fails the build if any are
+        # outstanding rather than silently accepting them.
+        run: go fix -diff ./...
+
       - name: Test
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
@@ -61,27 +70,10 @@ jobs:
           # needs the baseline commit reachable, not just the tip.
           fetch-depth: 0
 
-      - name: Read tools.mod Go version
-        # setup-go's go-version-file input only recognizes files literally
-        # named go.mod/go.work/.go-version/.tool-versions (confirmed the
-        # hard way: pointing it straight at tools.mod dumped the whole file
-        # back as if it were a bare version string, then failed with
-        # "Unable to find Go version '<entire tools.mod contents>'").
-        # tools.mod needs a newer Go than the root go.mod on purpose (see
-        # the next step), so extract its go directive here instead and feed
-        # that to go-version.
-        id: toolsgo
-        run: echo "version=$(grep -m1 '^go ' tools.mod | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # tools.mod's version, not the root go.mod's: golangci-lint can
-          # (and here does) require a newer Go to build than this library
-          # advertises as its own minimum -- deliberately kept low in
-          # go.mod's go directive (see README/ledongthuc/pdf#49/#54, users
-          # who need this library importable from older Go versions).
-          go-version: ${{ steps.toolsgo.outputs.version }}
+          go-version-file: go.mod
 
       - name: Lint
         # go tool -modfile, not the golangci-lint-action marketplace action:
@@ -97,16 +89,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Read tools.mod Go version
-        # See the Lint job's identically-named step for why this can't just
-        # be go-version-file: tools.mod.
-        id: toolsgo
-        run: echo "version=$(grep -m1 '^go ' tools.mod | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ steps.toolsgo.outputs.version }}
+          go-version-file: go.mod
 
       - name: Check vulnerabilities
         # This fork's entire reason to exist is hardening against malformed
@@ -115,35 +101,3 @@ jobs:
         # unnoticed would undercut that, so this blocks merge rather than
         # just reporting.
         run: go tool -modfile=tools.mod govulncheck ./...
-
-  gofix:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Read tools.mod Go version
-        # `go fix -diff`'s modernizer-based rewrites need a newer go command
-        # than this library advertises as its own minimum (root go.mod's go
-        # 1.24.1 doesn't even recognize the -diff flag) -- tools.mod already
-        # carries a newer Go for golangci-lint/govulncheck, so reuse it here
-        # too rather than adding a third version to track. See the Lint
-        # job's identically-named step for why this can't just be
-        # go-version-file: tools.mod.
-        id: toolsgo
-        run: echo "version=$(grep -m1 '^go ' tools.mod | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: ${{ steps.toolsgo.outputs.version }}
-
-      - name: Check Go fixes
-        # go fix is built into the go command, not a separate tool (so
-        # nothing in tools.mod names it) -- reports safe, mechanical
-        # modernizations: any/interface{}, range-over-int, and similar, the
-        # same rewrites `make fix` applies locally. -diff fails the build if
-        # any are outstanding rather than silently accepting them; the repo
-        # is clean as of this workflow's addition, so this is a real gate,
-        # not a report-only step.
-        run: go fix -diff ./...

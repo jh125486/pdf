@@ -1,6 +1,6 @@
 module github.com/jh125486/pdf/tools
 
-go 1.26.6
+go 1.26
 
 tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint

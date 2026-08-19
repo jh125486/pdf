@@ -1,3 +1,3 @@
 module github.com/jh125486/pdf
 
-go 1.24.1
+go 1.26
