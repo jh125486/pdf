@@ -13,6 +13,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # SONAR_TOKEN is exposed at job level, not just the SonarCloud step's own
+    # env:, specifically so the SonarCloud Scan step's `if:` guard below can
+    # read it as `env.SONAR_TOKEN` -- the `secrets` context is not a valid
+    # expression context inside a step/job `if:` at all (referencing
+    # secrets.SONAR_TOKEN directly in `if:` fails the whole workflow at
+    # parse time, before any job even starts; see turango's ci.yml for the
+    # same fix, found there the hard way).
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Check out code
         # Actions below are pinned to full commit SHAs, not tags: a tag can be
@@ -60,6 +69,18 @@ jobs:
           # keeps a missing/invalid token from failing the whole CI run.
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+      - name: SonarCloud Scan
+        # Guarded on the secret's presence (not just left to fail) so this
+        # step is a no-op -- not a broken CI run -- until SONAR_TOKEN exists
+        # as a repo secret. SonarCloud's Go analyzer reads coverage.out
+        # directly via sonar.go.coverage.reportPaths (see
+        # sonar-project.properties), so this must run after the Test step
+        # above, not standalone.
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   lint:
     runs-on: ubuntu-latest

@@ -6,6 +6,7 @@
 [![CodeQL](https://github.com/jh125486/pdf/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/jh125486/pdf/actions/workflows/codeql-analysis.yml)
 
 [![Codecov](https://codecov.io/gh/jh125486/pdf/branch/main/graph/badge.svg)](https://codecov.io/gh/jh125486/pdf)
+[![Sonar Coverage](https://sonarcloud.io/api/project_badges/measure?project=jh125486_pdf&metric=coverage)](https://sonarcloud.io/summary/overall?id=jh125486_pdf)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/jh125486/pdf/badge)](https://scorecard.dev/viewer/?uri=github.com/jh125486/pdf)
 
 A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf.
