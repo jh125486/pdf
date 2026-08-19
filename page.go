@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -612,6 +613,7 @@ func (p Page) GetPlainText(fonts map[string]*Font) (result string, err error) {
 		return "", nil
 	}
 	strm := p.V.Key("Contents")
+	resources := p.Resources()
 	var enc TextEncoding = &nopEncoder{}
 
 	if fonts == nil {
@@ -635,56 +637,97 @@ func (p Page) GetPlainText(fonts map[string]*Font) (result string, err error) {
 		}
 	}
 
-	Interpret(strm, func(stk *Stack, op string) {
-		n := stk.Len()
-		args := make([]Value, n)
-		for i := n - 1; i >= 0; i-- {
-			args[i] = stk.Pop()
+	// interpret runs strm's operators, recursing into "Do" invocations of
+	// Form XObjects. Text is often drawn inside a Form XObject rather than
+	// directly in the page's content stream -- form-field appearance
+	// streams are the common case -- and until now Do fell into the
+	// default no-op case, silently dropping that text. depth guards
+	// against a Form XObject whose own content references itself (directly
+	// or through a cycle of other Forms), which would otherwise recurse
+	// until the goroutine stack was exhausted.
+	var interpret func(strm, resources Value, fonts map[string]*Font, depth int)
+	interpret = func(strm, resources Value, fonts map[string]*Font, depth int) {
+		if depth > maxObjectDepth {
+			panic("Form XObject nesting too deep")
 		}
+		Interpret(strm, func(stk *Stack, op string) {
+			n := stk.Len()
+			args := make([]Value, n)
+			for i := n - 1; i >= 0; i-- {
+				args[i] = stk.Pop()
+			}
 
-		switch op {
-		default:
-			// Easier debug
-			// fmt.Println("<DEBUG><op>", op, "</op><args>", args, "</args>")
-			return
-		case "BT": // add a space between text objects
-			showText("\n")
-		case "T*": // move to start of next line
-			showEncodedText("\n")
-		case "Tf": // set text font and size
-			if len(args) != 2 {
-				panic("bad TL")
-			}
-			if font, ok := fonts[args[0].Name()]; ok {
-				enc = font.Encoder()
-			} else {
-				enc = &nopEncoder{}
-			}
-		case "\"": // set spacing, move to next line, and show text
-			if len(args) != 3 {
-				panic("bad \" operator")
-			}
-			fallthrough
-		case "'": // move to next line and show text
-			if len(args) != 1 {
-				panic("bad ' operator")
-			}
-			fallthrough
-		case "Tj": // show text
-			if len(args) != 1 {
-				panic("bad Tj operator")
-			}
-			showEncodedText(args[0].RawString())
-		case "TJ": // show text, allowing individual glyph positioning
-			v := args[0]
-			for i := 0; i < v.Len(); i++ {
-				x := v.Index(i)
-				if x.Kind() == String {
-					showEncodedText(x.RawString())
+			switch op {
+			default:
+				// Easier debug
+				// fmt.Println("<DEBUG><op>", op, "</op><args>", args, "</args>")
+				return
+			case "BT": // add a space between text objects
+				showText("\n")
+			case "T*": // move to start of next line
+				showEncodedText("\n")
+			case "Tf": // set text font and size
+				if len(args) != 2 {
+					panic("bad TL")
 				}
+				if font, ok := fonts[args[0].Name()]; ok {
+					enc = font.Encoder()
+				} else {
+					enc = &nopEncoder{}
+				}
+			case "\"": // set spacing, move to next line, and show text
+				if len(args) != 3 {
+					panic("bad \" operator")
+				}
+				fallthrough
+			case "'": // move to next line and show text
+				if len(args) != 1 {
+					panic("bad ' operator")
+				}
+				fallthrough
+			case "Tj": // show text
+				if len(args) != 1 {
+					panic("bad Tj operator")
+				}
+				showEncodedText(args[0].RawString())
+			case "TJ": // show text, allowing individual glyph positioning
+				v := args[0]
+				for i := 0; i < v.Len(); i++ {
+					x := v.Index(i)
+					if x.Kind() == String {
+						showEncodedText(x.RawString())
+					}
+				}
+			case "Do": // invoke an XObject
+				if len(args) != 1 {
+					return
+				}
+				xobj := resources.Key("XObject").Key(args[0].Name())
+				if xobj.Kind() != Stream || xobj.Key("Subtype").Name() != "Form" {
+					return // image or other non-Form XObject: no text to extract
+				}
+				xres, xfonts := resources, fonts
+				if r := xobj.Key("Resources"); r.Kind() != Null {
+					// A Form XObject with its own /Resources looks up
+					// fonts there first, falling back to the invoking
+					// content stream's resources for names it doesn't
+					// redefine (PDF 32000-1:2008 §7.8.3).
+					xres = r
+					xfonts = make(map[string]*Font, len(fonts))
+					maps.Copy(xfonts, fonts)
+					fontDict := r.Key("Font")
+					for _, name := range fontDict.Keys() {
+						f := Font{fontDict.Key(name), nil}
+						xfonts[name] = &f
+					}
+				}
+				savedEnc := enc
+				interpret(xobj, xres, xfonts, depth+1)
+				enc = savedEnc
 			}
-		}
-	})
+		})
+	}
+	interpret(strm, resources, fonts, 0)
 	return textBuilder.String(), nil
 }
 

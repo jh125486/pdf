@@ -920,20 +920,7 @@ func TestUnterminatedArrayEndsCleanly(t *testing.T) {
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 	}
 
-	var b strings.Builder
-	b.WriteString("%PDF-1.4\n")
-	offsets := make([]int, len(objs))
-	for i, body := range objs {
-		offsets[i] = b.Len()
-		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
-	}
-	xrefOff := b.Len()
-	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
-	for _, off := range offsets {
-		fmt.Fprintf(&b, "%010d 00000 n \n", off)
-	}
-	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
-	data := []byte(b.String())
+	data := buildPDF(objs)
 
 	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -1001,20 +988,7 @@ func TestReaderRecoversFromMalformedFilter(t *testing.T) {
 		"<< /Length 0 >>\nstream\n\nendstream",
 	}
 
-	var b strings.Builder
-	b.WriteString("%PDF-1.4\n")
-	offsets := make([]int, len(objs))
-	for i, body := range objs {
-		offsets[i] = b.Len()
-		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
-	}
-	xrefOff := b.Len()
-	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
-	for _, off := range offsets {
-		fmt.Fprintf(&b, "%010d 00000 n \n", off)
-	}
-	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
-	data := []byte(b.String())
+	data := buildPDF(objs)
 
 	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -1092,4 +1066,91 @@ func TestAESEncryptMetadataFalse(t *testing.T) {
 	if !strings.Contains(string(text), "hello world") {
 		t.Errorf("GetPlainText = %q, want it to contain %q", text, "hello world")
 	}
+}
+
+// TestGetPlainTextReadsFormXObjects guards ledongthuc/pdf#67: GetPlainText's
+// operator switch had no case for "Do", so text drawn inside a Form
+// XObject -- form-field appearance streams are the common real-world case,
+// which is what the issue's repro turned out to be -- was silently
+// dropped instead of extracted.
+func TestGetPlainTextReadsFormXObjects(t *testing.T) {
+	// The page's content stream only invokes the Form XObject; all its text
+	// lives inside the Form, exercising both the recursion into Do and the
+	// Form's own /Resources/Font shadowing the page's.
+	pageContent := "q 1 0 0 1 0 0 cm /Xi0 Do Q"
+	xobjContent := "q BT /F1 12 Tf 10 10 Td (Hidden Text) Tj ET Q"
+
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] " +
+			"/Resources << /XObject << /Xi0 6 0 R >> >> /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(pageContent), pageContent),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 100 20] "+
+			"/Resources << /Font << /F1 5 0 R >> >> /Length %d >>\nstream\n%s\nendstream",
+			len(xobjContent), xobjContent),
+	}
+	data := buildPDF(objs)
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	text, err := r.Page(1).GetPlainText(nil)
+	if err != nil {
+		t.Fatalf("GetPlainText: %v", err)
+	}
+	if !strings.Contains(text, "Hidden Text") {
+		t.Errorf("GetPlainText = %q, want it to contain %q", text, "Hidden Text")
+	}
+}
+
+// TestGetPlainTextBoundsFormXObjectRecursion guards against a Form XObject
+// whose content invokes itself, directly or through a cycle of other
+// Forms: without a depth bound, that recurses through Interpret/Do until
+// the goroutine stack is exhausted -- an uncatchable fatal error, not a
+// panic GetPlainText's recover could turn into a normal error return.
+func TestGetPlainTextBoundsFormXObjectRecursion(t *testing.T) {
+	xobjContent := "q 1 0 0 1 0 0 cm /Xi0 Do Q" // invokes itself
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] " +
+			"/Resources << /XObject << /Xi0 5 0 R >> >> /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(xobjContent), xobjContent),
+		fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 100 20] "+
+			"/Resources << /XObject << /Xi0 5 0 R >> >> /Length %d >>\nstream\n%s\nendstream",
+			len(xobjContent), xobjContent),
+	}
+	data := buildPDF(objs)
+
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	mustNotCrash(t, func() {
+		if _, err := r.Page(1).GetPlainText(nil); err == nil {
+			t.Error("GetPlainText on a self-referencing Form XObject: got nil error, want one")
+		}
+	})
+}
+
+// buildPDF assembles objs (1-indexed bodies, without "N 0 obj"/"endobj")
+// into a minimal classic-xref-table PDF.
+func buildPDF(objs []string) []byte {
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, body := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xrefOff := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xrefOff)
+	return []byte(b.String())
 }
