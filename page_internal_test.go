@@ -7,6 +7,7 @@ package pdf
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,36 @@ func TestGetTextByRowColumnReportErrors(t *testing.T) {
 	}
 	if _, err := p.GetTextByColumn(); err == nil {
 		t.Error("GetTextByColumn: got nil error, want the recovered panic")
+	}
+}
+
+// TestQuoteOperatorHandlesThreeOperands covers the `"` operator (set
+// spacing, move to next line, show text), which takes 3 operands (aw ac
+// string). It must trim args down to the trailing string before falling
+// through into the `'`/`Tj` cases, which expect exactly 1 arg -- otherwise a
+// well-formed `"` operator panics as "bad ' operator" instead of being
+// handled. Covers both GetPlainText and the walkTextBlocks-based
+// GetTextByRow/GetTextByColumn paths.
+func TestQuoteOperatorHandlesThreeOperands(t *testing.T) {
+	t.Parallel()
+
+	const content = `BT 1 2 (hello) " ET`
+	p := pageWithContent(content)
+
+	text, err := p.GetPlainText(nil)
+	if err != nil {
+		t.Fatalf("GetPlainText: unexpected error: %v", err)
+	}
+	if !strings.Contains(text, "hello") {
+		t.Errorf("GetPlainText: got %q, want it to contain %q", text, "hello")
+	}
+
+	rows, err := p.GetTextByRow()
+	if err != nil {
+		t.Fatalf("GetTextByRow: unexpected error: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("GetTextByRow: got no rows, want at least one")
 	}
 }
 
