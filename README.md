@@ -9,6 +9,9 @@
 [![Sonar Coverage](https://sonarcloud.io/api/project_badges/measure?project=jh125486_pdf&metric=coverage)](https://sonarcloud.io/summary/overall?id=jh125486_pdf)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/jh125486/pdf/badge)](https://scorecard.dev/viewer/?uri=github.com/jh125486/pdf)
 
+[![Mutation score](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jh125486/pdf/gh-pages/mutation-score.json)](https://github.com/jh125486/pdf/actions/workflows/mutation-badge.yml)
+[![Mutants](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jh125486/pdf/gh-pages/mutants-count.json)](https://github.com/jh125486/pdf/actions/workflows/mutation-badge.yml)
+
 A simple Go library which enables reading PDF files. Forked from https://github.com/ledongthuc/pdf.
 
 **Why this fork exists**: upstream has been unresponsive to open security PRs, including the fix
