@@ -1,0 +1,11 @@
+# Codecov configuration for jh125486/pdf.
+#
+# examples/ and pdfpasswd/ are illustrative/CLI wrapper code, not part of
+# this library's public API surface -- already excluded from
+# .golangci.yml's linters/formatters and from sonar-project.properties'
+# sonar.exclusions for the same reason. Ignoring them here keeps the
+# reported/gated percentage representative of the library package itself,
+# rather than being dragged down by unexercised example/CLI code.
+ignore:
+  - "examples/**"
+  - "pdfpasswd/**"
