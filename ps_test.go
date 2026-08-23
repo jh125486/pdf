@@ -1,35 +1,26 @@
-package pdf
+package pdf_test
 
 import (
 	"bytes"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/jh125486/pdf"
 )
 
-func TestInterpretContinuesTokensAcrossContentStreams(t *testing.T) {
-	pdfData := splitTextArrayPDF()
-	reader, err := NewReader(bytes.NewReader(pdfData), int64(len(pdfData)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	text, err := reader.Page(1).GetPlainText(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(text); got != "Hello world" {
-		t.Fatalf("text = %q, want %q", got, "Hello world")
-	}
-}
-
+// splitTextArrayPDF builds a page whose /Contents is an array of two
+// separate content streams: the first opens a "[ (Hello)" TJ array and the
+// second closes it with "( world)] TJ". Interpret concatenates the streams
+// with io.MultiReader, so the array token has to survive the boundary
+// between them.
 func splitTextArrayPDF() []byte {
-	var pdf bytes.Buffer
-	pdf.WriteString("%PDF-1.4\n")
+	var pdfBuf bytes.Buffer
+	pdfBuf.WriteString("%PDF-1.4\n")
 	offsets := make([]int, 7)
 	writeObject := func(number int, body string) {
-		offsets[number] = pdf.Len()
-		fmt.Fprintf(&pdf, "%d 0 obj\n%s\nendobj\n", number, body)
+		offsets[number] = pdfBuf.Len()
+		fmt.Fprintf(&pdfBuf, "%d 0 obj\n%s\nendobj\n", number, body)
 	}
 	writeStream := func(number int, content string) {
 		writeObject(number, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content)+1, content))
@@ -42,11 +33,48 @@ func splitTextArrayPDF() []byte {
 	writeStream(5, "( world)] TJ ET")
 	writeObject(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
-	xrefOffset := pdf.Len()
-	pdf.WriteString("xref\n0 7\n0000000000 65535 f \n")
+	xrefOffset := pdfBuf.Len()
+	pdfBuf.WriteString("xref\n0 7\n0000000000 65535 f \n")
 	for number := 1; number <= 6; number++ {
-		fmt.Fprintf(&pdf, "%010d 00000 n \n", offsets[number])
+		fmt.Fprintf(&pdfBuf, "%010d 00000 n \n", offsets[number])
 	}
-	fmt.Fprintf(&pdf, "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xrefOffset)
-	return pdf.Bytes()
+	fmt.Fprintf(&pdfBuf, "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xrefOffset)
+	return pdfBuf.Bytes()
+}
+
+// TestInterpretContinuesTokensAcrossContentStreams calls the exported
+// Interpret directly against a /Contents value that resolves to an array of
+// two streams (Value.Kind() == Array), verifying the TJ array token split
+// across the stream boundary is reassembled correctly rather than treated
+// as two separate, truncated tokens.
+func TestInterpretContinuesTokensAcrossContentStreams(t *testing.T) {
+	t.Parallel()
+
+	data := splitTextArrayPDF()
+	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contents := r.Page(1).V.Key("Contents")
+	if contents.Kind() != pdf.Array {
+		t.Fatalf("Contents kind = %v, want Array", contents.Kind())
+	}
+
+	var got strings.Builder
+	pdf.Interpret(contents, func(stk *pdf.Stack, op string) {
+		if op != "TJ" {
+			return
+		}
+		arr := stk.Pop()
+		for i := 0; i < arr.Len(); i++ {
+			if el := arr.Index(i); el.Kind() == pdf.String {
+				got.WriteString(el.RawString())
+			}
+		}
+	})
+
+	if want := "Hello world"; got.String() != want {
+		t.Fatalf("text = %q, want %q", got.String(), want)
+	}
 }

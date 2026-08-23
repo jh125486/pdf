@@ -1,3 +1,7 @@
+// Whitebox: exercises buffer, token, and object parsing internals of lex.go
+// that have no exported surface (buffer, token, keyword, name are all
+// unexported).
+
 package pdf
 
 import (
@@ -47,6 +51,8 @@ func buildUnterminatedArrayPDF() []byte {
 // value, which matched neither nil nor keyword("]"), so readArray appended
 // io.EOF objects forever, allocating memory without bound.
 func TestUnterminatedArrayTerminates(t *testing.T) {
+	t.Parallel()
+
 	data := buildUnterminatedArrayPDF()
 	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -57,7 +63,7 @@ func TestUnterminatedArrayTerminates(t *testing.T) {
 	go func() {
 		defer close(done)
 		// The extracted text is irrelevant; the call just has to return.
-		r.GetPlainText()
+		_, _ = r.GetPlainText()
 	}()
 
 	select {
@@ -65,5 +71,73 @@ func TestUnterminatedArrayTerminates(t *testing.T) {
 		// ok: extraction terminated
 	case <-time.After(5 * time.Second):
 		t.Fatal("GetPlainText did not return within 5s: readArray is looping on io.EOF at end of a truncated content stream")
+	}
+}
+
+// TestSeekForwardOutOfRange pins the buffer position check. A negative or
+// backwards seek left buf.pos negative, which indexed buf out of bounds on
+// the next read.
+func TestSeekForwardOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		off  int64
+	}{
+		{"negative", -1},
+		{"far negative", -1 << 40},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			b := newBuffer(bytes.NewReader([]byte("hello world")), 0)
+			b.allowEOF = true
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Errorf("seekForward(%d): no error reported", tt.off)
+					}
+				}()
+				b.seekForward(tt.off)
+				b.readByte()
+			}()
+		})
+	}
+}
+
+// TestMalformedLexer covers tokenizer termination for hand-crafted content
+// streams that previously hung or panicked in unexpected ways.
+func TestMalformedLexer(t *testing.T) {
+	t.Parallel()
+
+	// readByte reports end of input as '\n' once allowEOF is set, so a hex
+	// string with no closing '>' used to skip whitespace forever.
+	unterminatedHex := []string{"<AB", "<AB ", "<", "<A", "< ", "<AB\n\n\n"}
+	for _, content := range unterminatedHex {
+		t.Run("unterminated hex string "+content, func(t *testing.T) {
+			t.Parallel()
+
+			mustNotCrash(t, func() {
+				Interpret(rawStream(content), func(stk *Stack, op string) {})
+			})
+		})
+	}
+
+	// These are rejected by design. What matters is that they terminate: the
+	// panic is the library's own error signal, reported to callers by the
+	// public APIs that recover.
+	rejected := []string{"(unterminated", "(nested (deeper", "/name#", "/name#z", "<AB<CD", "<AG>"}
+	for _, content := range rejected {
+		t.Run("rejected "+content, func(t *testing.T) {
+			t.Parallel()
+
+			if _, timedOut := run(t, func() {
+				Interpret(rawStream(content), func(stk *Stack, op string) {})
+			}); timedOut {
+				t.Errorf("did not return within %v", caseTimeout)
+			}
+		})
 	}
 }
