@@ -1,0 +1,47 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly extended fuzzing run, matching this repo's other slow/scheduled
+    # scans (scorecard.yml, codeql-analysis.yml) rather than running on every
+    # push.
+    - cron: '30 2 * * 6'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        # Actions below are pinned to full commit SHAs, not tags: a tag can be
+        # re-pointed (deliberately, by a re-tag, or maliciously, by a
+        # compromised release) to run different code than what was reviewed,
+        # while a SHA can't. The trailing `# vN` comment is only for humans.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Determine fuzz time
+        id: fuzztime
+        # push/pull_request gets a cheap smoke run so a regression is caught
+        # on the PR itself; the weekly schedule (and manual dispatch) gets a
+        # much longer run since it isn't blocking anyone's merge.
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "duration=5m" >> "$GITHUB_OUTPUT"
+          else
+            echo "duration=30s" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fuzz FuzzNewReader
+        run: go test -run=^$ -fuzz=FuzzNewReader -fuzztime=${{ steps.fuzztime.outputs.duration }} .
