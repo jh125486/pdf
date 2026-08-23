@@ -78,3 +78,108 @@ func TestInterpretContinuesTokensAcrossContentStreams(t *testing.T) {
 		t.Fatalf("text = %q, want %q", got.String(), want)
 	}
 }
+
+// TestStackPopEmpty covers Pop's empty-stack branch, which returns the zero
+// Value rather than panicking or indexing out of bounds.
+func TestStackPopEmpty(t *testing.T) {
+	t.Parallel()
+
+	var stk pdf.Stack
+	got := stk.Pop()
+	if got.Kind() != pdf.Null {
+		t.Errorf("Pop on empty stack: Kind() = %v, want Null", got.Kind())
+	}
+}
+
+// TestInterpretDictOperators covers Interpret's built-in PostScript-dict
+// operators (dict, begin, currentdict, def, pop, end) and the name-lookup
+// path that resolves a bare keyword against the open dict stack before
+// handing it to the caller's do function. These operators back the limited
+// PostScript found in ToUnicode CMaps, but are exercised here directly
+// rather than through a full cmap, since most real cmaps never use "def".
+func TestInterpretDictOperators(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		wantOps []string // operator names seen by do, in order
+	}{
+		{
+			name:    "dict def then resolved by name lookup",
+			content: "1 dict begin /Greeting (hi) def Greeting end",
+			// "Greeting" resolves against the open dict instead of
+			// reaching do as an operator, so only the dict push/pop
+			// machinery runs; do sees nothing.
+			wantOps: nil,
+		},
+		{
+			name:    "currentdict pushes the open dict",
+			content: "1 dict begin currentdict end",
+			wantOps: nil,
+		},
+		{
+			name:    "pop discards the top of stack",
+			content: "1 2 pop show",
+			wantOps: []string{"show"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var gotOps []string
+			mustNotCrash(t, func() {
+				pdf.Interpret(rawStreamPS(tt.content), func(stk *pdf.Stack, op string) {
+					gotOps = append(gotOps, op)
+				})
+			})
+			if len(gotOps) != len(tt.wantOps) {
+				t.Fatalf("ops = %v, want %v", gotOps, tt.wantOps)
+			}
+			for i := range gotOps {
+				if gotOps[i] != tt.wantOps[i] {
+					t.Errorf("ops[%d] = %q, want %q", i, gotOps[i], tt.wantOps[i])
+				}
+			}
+		})
+	}
+}
+
+// TestInterpretNameLookupResolvesValue covers the branch where a bare
+// keyword resolves to a value bound by "def" in an open dict: the resolved
+// value is pushed onto the stack rather than the keyword reaching do as an
+// operator.
+func TestInterpretNameLookupResolvesValue(t *testing.T) {
+	t.Parallel()
+
+	var got string
+	pdf.Interpret(rawStreamPS("1 dict begin /Greeting (hi) def Greeting show"), func(stk *pdf.Stack, op string) {
+		if op != "show" {
+			return
+		}
+		got = stk.Pop().RawString()
+	})
+	if got != "hi" {
+		t.Errorf("resolved Greeting = %q, want %q", got, "hi")
+	}
+}
+
+// rawStreamPS returns a Value of Kind Stream holding content, with no
+// filter, for exercising Interpret directly. It mirrors helpers_test.go's
+// pattern for building fixtures from a real PDF, but Interpret only needs a
+// Reader, not a full document.
+func rawStreamPS(content string) pdf.Value {
+	data := buildPDF([]string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content),
+	})
+	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		panic(err)
+	}
+	return r.Page(1).V.Key("Contents")
+}

@@ -291,3 +291,94 @@ end`
 		t.Errorf("Decode(D) = %q, want %q", got, "D")
 	}
 }
+
+// TestCmapDecodeBfrangeArray covers cmap.Decode's bfrange-with-array-
+// destination success path: each code in the range indexes into the
+// destination array, and an entry that is itself a String is used directly.
+func TestCmapDecodeBfrangeArray(t *testing.T) {
+	t.Parallel()
+
+	const cm = `1 begincodespacerange
+<00> <ff>
+endcodespacerange
+1 beginbfrange
+<41> <42> [<0058> <0059>]
+endbfrange`
+
+	m := readCmap(rawStream(cm))
+	if m == nil {
+		t.Fatal("readCmap returned nil for a well-formed cmap")
+	}
+	if got := m.Decode("A"); got != "X" {
+		t.Errorf(`Decode("A") = %q, want %q`, got, "X")
+	}
+	if got := m.Decode("B"); got != "Y" {
+		t.Errorf(`Decode("B") = %q, want %q`, got, "Y")
+	}
+}
+
+// TestCmapDecodeUnmapped covers cmap.Decode's two "give up" paths: a byte
+// sequence that matches a declared codespace range but has no bfchar or
+// bfrange entry, and a byte that matches no codespace range at all (so
+// Decode falls back to consuming it one byte at a time).
+func TestCmapDecodeUnmapped(t *testing.T) {
+	t.Parallel()
+
+	t.Run("codespace matched, no bfchar or bfrange", func(t *testing.T) {
+		t.Parallel()
+
+		const cm = "1 begincodespacerange\n<00> <ff>\nendcodespacerange"
+		m := readCmap(rawStream(cm))
+		if m == nil {
+			t.Fatal("readCmap returned nil")
+		}
+		if got := m.Decode("A"); got != string(noRune) {
+			t.Errorf("Decode(A) = %q, want the replacement char", got)
+		}
+	})
+
+	t.Run("no codespace range matches", func(t *testing.T) {
+		t.Parallel()
+
+		// A codespace of 2-byte codes only; decoding a 1-byte string matches
+		// no range at all.
+		const cm = "1 begincodespacerange\n<0000> <ffff>\nendcodespacerange"
+		m := readCmap(rawStream(cm))
+		if m == nil {
+			t.Fatal("readCmap returned nil")
+		}
+		if got := m.Decode("A"); got != string(noRune) {
+			t.Errorf("Decode(A) = %q, want the replacement char", got)
+		}
+	})
+}
+
+// TestReadCmapDefineresource covers readCmap's "defineresource" operator,
+// part of the standard CMap resource-registration boilerplate
+// ("currentdict /CMap defineresource pop") that real ToUnicode CMaps emit
+// after endcmap.
+func TestReadCmapDefineresource(t *testing.T) {
+	t.Parallel()
+
+	const cm = `/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+1 begincodespacerange
+<00> <ff>
+endcodespacerange
+1 beginbfchar
+<41> <0042>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end`
+
+	m := readCmap(rawStream(cm))
+	if m == nil {
+		t.Fatal("readCmap returned nil for a cmap using defineresource")
+	}
+	if got := m.Decode("A"); got != "B" {
+		t.Errorf(`Decode("A") = %q, want %q`, got, "B")
+	}
+}
