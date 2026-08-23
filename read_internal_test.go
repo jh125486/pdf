@@ -1,13 +1,19 @@
-// Whitebox: exercises buffer.readObject's nesting-depth guard directly,
-// which requires constructing a buffer over raw bytes (newBuffer, buffer are
-// unexported).
+// Whitebox: exercises buffer.readObject's nesting-depth guard directly
+// (newBuffer, buffer are unexported), and decryptString/decryptStream/
+// cryptKey directly, since none of the fixtures elsewhere in this package
+// carry real, independently-derivable RC4/AES key material to drive them
+// through the public API.
 
 package pdf
 
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rc4" //nolint:gosec // G503: RC4 is a PDF spec-mandated legacy encryption filter this library must decrypt
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -171,5 +177,108 @@ func TestCompressedXrefStreamManyObjects(t *testing.T) {
 	}
 	if got := len(r.xref); got != n {
 		t.Errorf("xref table has %d entries, want %d", got, n)
+	}
+}
+
+// TestDecryptString covers both branches of decryptString: RC4 (a
+// symmetric stream cipher, so decrypting data XORed with the same key
+// recovers it) and AES-CBC (decryptString only decrypts, so the fixture
+// encrypts with a matching CBC encrypter first), plus the two malformed-
+// input panics on the AES path (ciphertext shorter than one block, and a
+// length that isn't a whole number of blocks).
+func TestDecryptString(t *testing.T) {
+	t.Parallel()
+
+	key := []byte("0123456789abcdef")
+	ptr := objptr{7, 0}
+
+	t.Run("rc4", func(t *testing.T) {
+		t.Parallel()
+
+		plain := "hello, rc4"
+		objKey := cryptKey(key, false, ptr)
+		c, err := rc4.NewCipher(objKey) //nolint:gosec // G405: exercising the library's own PDF RC4 decrypt path
+		if err != nil {
+			t.Fatalf("rc4.NewCipher: %v", err)
+		}
+		cipherBytes := []byte(plain)
+		c.XORKeyStream(cipherBytes, cipherBytes)
+
+		got := decryptString(key, false, ptr, string(cipherBytes))
+		if got != plain {
+			t.Errorf("decryptString(rc4) = %q, want %q", got, plain)
+		}
+	})
+
+	t.Run("aes", func(t *testing.T) {
+		t.Parallel()
+
+		plain := "0123456789abcdef" // exactly one AES block, so no padding to reason about
+		objKey := cryptKey(key, true, ptr)
+		block, err := aes.NewCipher(objKey)
+		if err != nil {
+			t.Fatalf("aes.NewCipher: %v", err)
+		}
+		iv := bytes.Repeat([]byte{0x01}, aes.BlockSize)
+		enc := make([]byte, len(plain))
+		cipher.NewCBCEncrypter(block, iv).CryptBlocks(enc, []byte(plain))
+		ciphertext := string(iv) + string(enc)
+
+		got := decryptString(key, true, ptr, ciphertext)
+		if got != plain {
+			t.Errorf("decryptString(aes) = %q, want %q", got, plain)
+		}
+	})
+
+	t.Run("aes ciphertext shorter than block size panics", func(t *testing.T) {
+		t.Parallel()
+
+		defer func() {
+			if recover() == nil {
+				t.Error("decryptString: no panic on short AES ciphertext, want one")
+			}
+		}()
+		decryptString(key, true, ptr, "short")
+	})
+
+	t.Run("aes ciphertext not a block multiple panics", func(t *testing.T) {
+		t.Parallel()
+
+		defer func() {
+			if recover() == nil {
+				t.Error("decryptString: no panic on misaligned AES ciphertext, want one")
+			}
+		}()
+		// One full IV block plus a partial data block.
+		decryptString(key, true, ptr, strings.Repeat("x", aes.BlockSize+3))
+	})
+}
+
+// TestDecryptStreamRC4 covers decryptStream's RC4 branch (the AES branch is
+// already exercised end to end by TestAESEncryptMetadataFalse). RC4 is a
+// symmetric stream cipher, so running the same key over ciphertext produced
+// by manually XORing recovers the plaintext.
+func TestDecryptStreamRC4(t *testing.T) {
+	t.Parallel()
+
+	key := []byte("0123456789abcdef")
+	ptr := objptr{3, 0}
+	plain := "hello, stream"
+
+	objKey := cryptKey(key, false, ptr)
+	c, err := rc4.NewCipher(objKey) //nolint:gosec // G405: exercising the library's own PDF RC4 decrypt path
+	if err != nil {
+		t.Fatalf("rc4.NewCipher: %v", err)
+	}
+	cipherBytes := []byte(plain)
+	c.XORKeyStream(cipherBytes, cipherBytes)
+
+	rd := decryptStream(key, false, ptr, bytes.NewReader(cipherBytes))
+	got, err := io.ReadAll(rd)
+	if err != nil {
+		t.Fatalf("reading decrypted stream: %v", err)
+	}
+	if string(got) != plain {
+		t.Errorf("decryptStream(rc4) = %q, want %q", got, plain)
 	}
 }
