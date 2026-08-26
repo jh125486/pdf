@@ -11,6 +11,17 @@ name: Mutation badges
 # never per-push or per-PR -- same reasoning as turango's own dogfooding
 # workflow (github.com/jh125486/turango
 # .github/workflows/mutation-badge.yml), which this file is adapted from.
+#
+# There is only one package here (".", already run with the cheaper
+# -mutatescope=package), so unlike a multi-package repo this can't be
+# sharded across CI jobs by package path. Instead, a "plan" job enumerates
+# every func/method name in the package via `go doc -all -u` and splits
+# them round-robin into NUM_SHARDS buckets, each becoming an anchored
+# `-mutate=<regexp>` alternation (turango's `-mutate` is a name regexp,
+# same convention as `-run`/`-bench`/`-fuzz`, not a package selector). This
+# keeps the split self-maintaining: a renamed/added/removed function is
+# picked up next run without editing this file, unlike a hardcoded name
+# list would be.
 on:
   schedule:
     # Weekly. The mutation score changes only when source or tests change,
@@ -20,17 +31,70 @@ on:
     - cron: '0 6 * * 1' # 06:00 UTC every Monday
   workflow_dispatch: {}
 
+env:
+  # How many parallel shards to split the function list across. Each shard
+  # gets its own runner, so raise this to trade more concurrent runners for
+  # a shorter wall-clock time; the plan job's round-robin split adapts
+  # automatically, no other change needed.
+  NUM_SHARDS: 4
+
 permissions:
   contents: read
 
 jobs:
-  mutation-score:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    # contents:write is required to push the generated badge JSON to
-    # gh-pages via peaceiris/actions-gh-pages; cannot be downgraded to read.
-    permissions:
-      contents: write
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Enumerate functions/methods and split into shard patterns
+        id: plan
+        run: |
+          # go doc's `func ` lines cover both plain funcs ("func Name(...)")
+          # and methods ("func (recv Type) Name(...)"); strip everything
+          # but the identifier turango's -mutate regex needs to match.
+          mapfile -t names < <(
+            go doc -all -u . \
+              | grep -E '^func ' \
+              | sed -E 's/^func (\([^)]*\) )?([A-Za-z0-9_]+)\(.*/\2/' \
+              | sort -u
+          )
+
+          n="${NUM_SHARDS}"
+          declare -a groups
+          for i in "${!names[@]}"; do
+            idx=$(( i % n ))
+            if [ -z "${groups[$idx]:-}" ]; then
+              groups[$idx]="${names[$i]}"
+            else
+              groups[$idx]="${groups[$idx]}|${names[$i]}"
+            fi
+          done
+
+          matrix=$(jq -n --argjson n "$n" '{include: []}')
+          for (( idx=0; idx<n; idx++ )); do
+            pattern="^(${groups[$idx]})\$"
+            matrix=$(echo "$matrix" | jq -c --argjson idx "$idx" --arg pattern "$pattern" \
+              '.include += [{"shard": $idx, "pattern": $pattern}]')
+          done
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  mutation-shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -44,33 +108,55 @@ jobs:
         run: go install github.com/jh125486/turango/cmd/turango@latest
 
       # Verdicts are cached across scheduled runs, keyed on the hash of
-      # every source/test file the run below covers: an unrelated doc-only
-      # change still gets a full cache hit next Monday, and a real source
-      # edit invalidates only the mutants it affects, not the whole run.
+      # every source/test file the run below covers plus the shard index,
+      # so an unrelated doc-only change still gets a full cache hit next
+      # Monday, a real source edit invalidates only the mutants it affects,
+      # and shards never share or clobber each other's cache entries.
       - name: Restore mutation verdict cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: mutation-cache
-          key: mutation-cache-${{ hashFiles('*.go') }}
+          key: mutation-cache-${{ matrix.shard }}-${{ hashFiles('*.go') }}
           restore-keys: |
-            mutation-cache-
+            mutation-cache-${{ matrix.shard }}-
 
-      - name: Run turango against the pdf package
+      - name: Run turango against this shard's functions
         run: |
           mkdir -p mutation-report mutation-cache
-          turango test -mutate=. \
+          turango test -mutate="${{ matrix.pattern }}" \
             -mutatescope=package \
             -mutateoutput=mutation-report \
             -mutatecache=mutation-cache \
             .
 
-      - name: Compute mutation metrics
+      - name: Upload shard report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutation-report-${{ matrix.shard }}
+          path: mutation-report/mutate-report.json
+
+  publish-badges:
+    needs: mutation-shard
+    runs-on: ubuntu-latest
+    # contents:write is required to push the generated badge JSON to
+    # gh-pages via peaceiris/actions-gh-pages; cannot be downgraded to read.
+    permissions:
+      contents: write
+    steps:
+      - name: Download all shard reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: mutation-report-*
+          path: mutation-reports
+          merge-multiple: false
+
+      - name: Merge shard reports and compute mutation metrics
         id: score
         run: |
-          report=mutation-report/mutate-report.json
-          mutants=$(jq '.Mutants | length' "$report")
-          killed=$(jq '[.Mutants[] | select(.Status=="killed")] | length' "$report")
-          survived=$(jq '[.Mutants[] | select(.Status=="survived")] | length' "$report")
+          reports=$(find mutation-reports -name mutate-report.json)
+          mutants=$(jq -s '[.[].Mutants[]] | length' $reports)
+          killed=$(jq -s '[.[].Mutants[] | select(.Status=="killed")] | length' $reports)
+          survived=$(jq -s '[.[].Mutants[] | select(.Status=="survived")] | length' $reports)
           viable=$((killed + survived))
 
           if [ "$viable" -eq 0 ]; then
