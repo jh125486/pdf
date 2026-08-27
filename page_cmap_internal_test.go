@@ -15,7 +15,7 @@ import "testing"
 // hasOperands directly without going through Interpret.
 func wsCmapStack(n int) *Stack {
 	var stk Stack
-	for i := 0; i < n; i++ {
+	for range n {
 		stk.Push(Value{})
 	}
 	return &stk
