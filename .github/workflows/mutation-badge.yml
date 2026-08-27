@@ -119,7 +119,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install turango
-        run: go install github.com/jh125486/turango/cmd/turango@latest
+        run: go install github.com/jh125486/turango/cmd/turango@0c9184696f8902eb9fd9d9b16760c31fc18df79f # main
 
       # Verdicts are cached across scheduled runs, keyed on the hash of
       # every source/test file the run below covers plus the shard index,
