@@ -12,16 +12,30 @@ name: Mutation badges
 # workflow (github.com/jh125486/turango
 # .github/workflows/mutation-badge.yml), which this file is adapted from.
 #
-# There is only one package here (".", already run with the cheaper
-# -mutatescope=package), so unlike a multi-package repo this can't be
-# sharded across CI jobs by package path. Instead, a "plan" job enumerates
-# every func/method name in the package via `go doc -all -u` and splits
-# them round-robin into NUM_SHARDS buckets, each becoming an anchored
-# `-mutate=<regexp>` alternation (turango's `-mutate` is a name regexp,
-# same convention as `-run`/`-bench`/`-fuzz`, not a package selector). This
-# keeps the split self-maintaining: a renamed/added/removed function is
-# picked up next run without editing this file, unlike a hardcoded name
-# list would be.
+# There is only one package here ("."), so unlike a multi-package repo
+# this can't be sharded across CI jobs by package path. Instead, a "plan"
+# job enumerates every func/method name in the package via `go doc -all -u`
+# and splits them round-robin into NUM_SHARDS buckets, each becoming an
+# anchored `-mutate=<regexp>` alternation (turango's `-mutate` is a name
+# regexp, same convention as `-run`/`-bench`/`-fuzz`, not a package
+# selector). This keeps the split self-maintaining: a renamed/added/removed
+# function is picked up next run without editing this file, unlike a
+# hardcoded name list would be.
+#
+# Each shard also runs with -mutatescope=impact rather than the cheaper-
+# looking-but-still-expensive -mutatescope=package: package reruns this
+# repo's whole `go test .` (which exercises a large malformed/hostile-PDF
+# corpus) for every single mutant, which is what made even a 4-way,
+# function-count-based split still exceed a 45-minute per-shard timeout
+# (see run 33012883249 -- all 4 shards were killed by their own job
+# timeout with no visible progress). impact builds a per-test coverage map
+# once, then reruns only the tests that actually cover each mutated line,
+# so per-mutant cost stops being "whole corpus suite" and starts being
+# "the handful of tests that touch this line." This does change what
+# counts as a kill: a mutant only "package" scope would have caught via an
+# unrelated test elsewhere in the suite won't be caught under impact. That
+# tradeoff is accepted here specifically to make the sweep finish; revisit
+# if the score shifts in a way that looks wrong rather than just lower.
 on:
   schedule:
     # Weekly. The mutation score changes only when source or tests change,
@@ -36,7 +50,7 @@ env:
   # gets its own runner, so raise this to trade more concurrent runners for
   # a shorter wall-clock time; the plan job's round-robin split adapts
   # automatically, no other change needed.
-  NUM_SHARDS: 4
+  NUM_SHARDS: 8
 
 permissions:
   contents: read
@@ -91,7 +105,7 @@ jobs:
   mutation-shard:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
@@ -124,7 +138,7 @@ jobs:
         run: |
           mkdir -p mutation-report mutation-cache
           turango test -mutate="${{ matrix.pattern }}" \
-            -mutatescope=package \
+            -mutatescope=impact \
             -mutateoutput=mutation-report \
             -mutatecache=mutation-cache \
             .
