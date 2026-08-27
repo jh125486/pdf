@@ -1329,7 +1329,20 @@ func okayV4(encrypt dict) bool {
 func cryptKey(key []byte, useAES bool, ptr objptr) []byte {
 	h := md5.New()
 	h.Write(key)
-	h.Write([]byte{byte(ptr.id), byte(ptr.id >> 8), byte(ptr.id >> 16), byte(ptr.gen), byte(ptr.gen >> 8)})
+	// Per PDF spec Algorithm 1, the key material includes the low-order 3
+	// bytes of the object number and the low-order 2 bytes of the
+	// generation number -- ptr.id/ptr.gen are already bounds-checked to
+	// uint32/uint16 at construction (see lex.go and readXrefTableData in
+	// read.go), so masking before the byte conversion just makes that
+	// intentional truncation explicit for both readers and static
+	// analysis, rather than looking like an unguarded narrowing.
+	h.Write([]byte{
+		byte(ptr.id & 0xff),
+		byte((ptr.id >> 8) & 0xff),
+		byte((ptr.id >> 16) & 0xff),
+		byte(ptr.gen & 0xff),
+		byte((ptr.gen >> 8) & 0xff),
+	})
 	if useAES {
 		h.Write([]byte("sAlT"))
 	}
