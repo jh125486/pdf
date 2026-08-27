@@ -56,6 +56,7 @@ func utf16Decode(s string) string {
 }
 
 // See PDF 32000-1:2008, Table D.2
+// nomutant: generated character-encoding lookup table, not hand-asserted per entry
 var pdfDocEncoding = [256]rune{
 	noRune, noRune, noRune, noRune, noRune, noRune, noRune, noRune,
 	noRune, 0x0009, 0x000a, noRune, noRune, 0x000d, noRune, noRune,
@@ -91,6 +92,7 @@ var pdfDocEncoding = [256]rune{
 	0x00f8, 0x00f9, 0x00fa, 0x00fb, 0x00fc, 0x00fd, 0x00fe, 0x00ff,
 }
 
+// nomutant: generated character-encoding lookup table, not hand-asserted per entry
 var winAnsiEncoding = [256]rune{
 	0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007,
 	0x0008, 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x000e, 0x000f,
@@ -126,6 +128,7 @@ var winAnsiEncoding = [256]rune{
 	0x00f8, 0x00f9, 0x00fa, 0x00fb, 0x00fc, 0x00fd, 0x00fe, 0x00ff,
 }
 
+// nomutant: generated character-encoding lookup table, not hand-asserted per entry
 var macRomanEncoding = [256]rune{
 	0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007,
 	0x0008, 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x000e, 0x000f,

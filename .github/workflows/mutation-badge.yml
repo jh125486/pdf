@@ -167,10 +167,17 @@ jobs:
       - name: Merge shard reports and compute mutation metrics
         id: score
         run: |
+          # Package-level declarations (e.g. a lookup-table var) aren't
+          # inside any function, so turango includes them in every shard
+          # regardless of that shard's -mutate function-name pattern --
+          # the same package-level mutant ID shows up in all N shard
+          # reports. Dedupe by ID before counting so the merged totals
+          # reflect each real mutant once, not once per shard.
           reports=$(find mutation-reports -name mutate-report.json)
-          mutants=$(jq -s '[.[].Mutants[]] | length' $reports)
-          killed=$(jq -s '[.[].Mutants[] | select(.Status=="killed")] | length' $reports)
-          survived=$(jq -s '[.[].Mutants[] | select(.Status=="survived")] | length' $reports)
+          merged=$(jq -s '[.[].Mutants[]] | unique_by(.ID)' $reports)
+          mutants=$(echo "$merged" | jq 'length')
+          killed=$(echo "$merged" | jq '[.[] | select(.Status=="killed")] | length')
+          survived=$(echo "$merged" | jq '[.[] | select(.Status=="survived")] | length')
           viable=$((killed + survived))
 
           if [ "$viable" -eq 0 ]; then
